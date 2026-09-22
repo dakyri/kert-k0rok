@@ -42,9 +42,10 @@ s.waitForBoot(
 
 
 )
-~root = "D:/sounds/supercollider/kert-k0rok";
+~root = "C:/sounds/supercollider/kert-k0rok";
 
 
-x = CSVFileReader.read(""D:/sounds/supercollider/kert-k0rok/floranium-data.csv", true, true).postcs
+x = CSVFileReader.read(~root +/+ "floranium-data.csv", true, true).postcs
+x[0][1]
 
 ~root +/+ "floranium-data.csv"

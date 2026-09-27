@@ -36,33 +36,117 @@ s.waitForBoot(
 	//  \wetAmp
 	//  \room
 	//  \damp
-	SynthDef("freeverb", { arg inBus = 9, outBus = 0;
+	SynthDef("freeverb", {
+		arg inBus = 9, outBus = 0;
 		var sig, wet;
 		sig = In.ar(inBus, 2);
 		wet = FreeVerb2.ar(sig[0], sig[1],
 			mix: \wetAmp.kr(0.3), room: \room.kr(1.0), damp: \damp.kr(0.85));
 		Out.ar(outBus, wet);
 	}).add;
+
+	SynthDef("clouds", {
+		arg inBus = 9, outBus = 0, pitch = 0, size = 0, texture = 0.5, mix = 1, reverb = 0.5, fb = 0;
+		var sig, wet, dens, pos;
+		sig = In.ar(inBus, 2);
+		dens = LFNoise1.kr(0.3).range(0.3, 0.45);
+		pos = LFNoise1.kr(0.3).range(0, 1);
+		wet = MiClouds.ar(sig, pit: pitch, pos: pos, size: size, dens: dens, tex: texture, drywet: mix,
+			spread: 1, rvb: reverb, fb: fb, mode: 0);
+		Out.ar(outBus, wet);
+	}).add;
+
+	~rvb = Synth("freeverb", [\inBus, ~reverbBus]);
+	~clouds = Synth("clouds", [\inBus, ~grainBus]);
 )
 
 
+)
+
+~clouds.set(\reverb, 0.3)
+~clouds.free
+
+b = Buffer.read(s, Platform.resourceDir +/+ "sounds/a11wlk01-44_1.aiff");
+(
+{
+var input = PlayBuf.ar(1, b, 1, loop: 1)!2;
+Out.ar(~grainBus, input)
+}.play
 )
 
 (
-SynthDef("chaosc", { arg outBus = 0, freqA = 32, freqB = 48, modAtoB = 227, modBtoA = 80, pan = 0, amp = 1;
+SynthDef("chaosc", {
+	arg outBus = 0, freqA = 16, freqB = 9, modAtoB = 133, modBtoA = 137, pan = 0, amp = 1, gate = 0, depth = 1;
     // LocalIn captures the feedback signal from the previous cycle
-	var sig;
+	var sig, env;
     var fbIn = LocalIn.ar(2);
     // Cross-modulate the frequencies of two sine oscillators
-    var fsigs = SinOsc.ar([freqA, freqB] + (fbIn.reverse * [modBtoA, modAtoB]));
+    var fsigs = SinOsc.ar([freqA, freqB] + (fbIn.reverse * [modBtoA*depth, modAtoB*depth]));
     // Send the signals back into the feedback loop
     LocalOut.ar(fsigs);
 	sig = 0.5 * (fsigs[0] + fsigs[1]);
-	Out.ar(outBus, Pan2.ar(amp * sig, pan));
+	env = EnvGen.kr(Env.asr(0, 1, 0.2, 'linear'), gate);
+	sig = Pan2.ar(amp * env * sig, pan);
+	Out.ar(outBus, sig);
+	Out.ar(~reverbBus, \rvbSend.kr(0)*sig);
+	Out.ar(~grainBus, \grainSend.kr(0)*sig);
 }).add;
 )
 
-Synth("chaosc", [\freq, 100, \ratio, 1.7]);
+~s1 = Synth("chaosc", [\freqA, 16, \freqB, 37, \depth, 1]);
+~s1.set(\gate, 1)
+~s1.set(\gate, 0)
+~s1.set(\depth, 1.2)
+~s1.set(\pan, -0.5)
+~s2.set(\modAtoB, 200)
+~s2.set(\modBtoA, 406)
+~s1.free
+
+~s1.nodeID
+(
+p = Pbind(
+    \type, \set,
+    \id, ~s2.nodeID,
+    \args, [\gate],
+	\gate, Pseq([1, 0], inf),
+	\dur, 1
+).play;
+)
+p.stop
+~s2 = Synth("chaosc", [\freqA, 17, \freqB, 45, \modAtoB, 90, \modBtoA, 241, \depth, 1]);
+~s2.set(\gate, 1)
+~s2.set(\gate, 0)
+~s2.set(\depth, 0.9)
+~s2.set(\pan, 0.6)
+~s2.set(\freqB, 11)
+~s2.set(\modAtoB, 116)
+~s2.set(\modBtoA, 406)
+~s2.free
+
+// Run the routine
+(
+~r3 = Routine({
+    // Convert the Env into a stream
+	var envStream = Env(~v1, [10], \lin).circle(2).asStream;
+ 	var envStream2 = Env(~v2, [4], \lin).circle(2).asStream;
+   var val, val2;
+
+    // Loop while values are still being generated
+    while { (val = envStream.value).notNil} {
+		val2 = 5 * (val - 1.5); // Print current envelope value to post window
+		val2.postln;
+		~s2.set(\depth, val2);
+		//~s2.set(\modBtoA, val2);
+        0.1.wait;     // Wait for 1 beat before next value
+    };
+}).play;
+)
+~r3.stop
+~r3.free;
+s.freeAll
+
+{LPF.ar(Saw.ar(200, 0.1), SinOsc.kr(XLine.kr(0.7, 300, 20), 0, 3600, 4000)) }.play;
+
 
 (
 ~notes = Array.fill(128, nil);
@@ -200,4 +284,30 @@ b = Buffer.read(s, Platform.resourceDir +/+ "sounds/a11wlk01-44_1.aiff");
 
 }.play
 )
+(
+SynthDef(\gatedSine, {
+  arg freq = 440, gate = 0; // Note how gate here is set to zero
+  var env, sig;
+	env = EnvGen.kr(Env.asr(20, 1, 4, 'linear'), gate);
+  sig = SinOsc.ar(freq);
+  Out.ar(0, sig * env ! 2);
+}).add;
+)
+~s1 = Synth(\gatedSine);
+~s1.set(\gate, 1);
+2]:
+~s1.free
+~s1.set(\gate, 0);
+
+(
+Ndef(\xfm, { arg freqA = 16, freqB = 9, modAtoB=133, modBtoA=137;
+	var fbIn = LocalIn.ar(2);
+	var sigs = SinOsc.ar([freqA, freqB] + (fbIn.reverse * [modBtoA, modAtoB]));
+	LocalOut.ar(sigs);
+	sigs * 0.5;
+}).play;
+)
+
+// Make sure the server is booted
+s.boot;
 

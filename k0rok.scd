@@ -1,29 +1,33 @@
 (
-s.waitForBoot(
+s.waitForBoot({
 	Buffer.freeAll;
-//	s.sync;
+	s.freeAll;
+	s.sync;
 
 /*
  * create global buses and groups
  */
-//	s.sync;
-	s.newBusAllocators;
-	~reverbBus = Bus.audio(s, 2); // collective output for supports and pads
-	~grainBus = Bus.audio(s, 2); // collective output for processed sound
-	~mainOut = 0; // audio out, 2 channel
-
-	~synthGrp = Group.new; // group for direct and strand players
-	~masterFXGrp = Group.after(~playGrp); // group for any master fx
-	~masterOutGrp = Group.after(~masterFXGrp); // group for main hardware io
-
 	~cleanup = {
 		ServerBoot.removeAll;
 		ServerQuit.removeAll;
 		ServerTree.removeAll;
 		CmdPeriod.removeAll;
+		"cleaned up...".postln;
 	};
 	ServerQuit.add(~cleanup);
-//	~cleanup();
+	~cleanup.value;
+
+	s.newBusAllocators;
+	~reverbBus = Bus.audio(s, 2); // collective output for supports and pads
+	~grainBus = Bus.audio(s, 2); // collective output for processed sound
+	~mainOut = 0; // audio out, 2 channel
+
+	~dataInBus = Bus.control(s, 1);
+	~lfo1Bus = Bus.control(s, 1);
+	~lfo2Bus = Bus.control(s, 1);
+
+	~synthGrp = Group.new; // group for direct and strand players
+	~fXGrp = Group.after(~synthGrp); // group for any master fx
 
 	~root = PathName(thisProcess.nowExecutingPath).pathOnly;
 	~csvdata = CSVFileReader.read(~root +/+ "floranium-data.csv", true, true);
@@ -56,27 +60,18 @@ s.waitForBoot(
 		Out.ar(outBus, wet);
 	}).add;
 
-	~rvb = Synth("freeverb", [\inBus, ~reverbBus]);
-	~clouds = Synth("clouds", [\inBus, ~grainBus]);
+	s.sync;
+
+	~rvb = Synth("freeverb", [\inBus, ~reverbBus], ~fXGrp);
+	~clouds = Synth("clouds", [\inBus, ~grainBus, \reverb, 0.3], ~fXGrp);
+})
 )
 
 
-)
-
-~clouds.set(\reverb, 0.3)
-~clouds.free
-
-b = Buffer.read(s, Platform.resourceDir +/+ "sounds/a11wlk01-44_1.aiff");
-(
-{
-var input = PlayBuf.ar(1, b, 1, loop: 1)!2;
-Out.ar(~grainBus, input)
-}.play
-)
-
+// main synth
 (
 SynthDef("chaosc", {
-	arg outBus = 0, freqA = 16, freqB = 9, modAtoB = 133, modBtoA = 137, pan = 0, amp = 1, gate = 0, depth = 1;
+	arg freqA = 16, freqB = 9, modAtoB = 133, modBtoA = 137, depth = 1, gate = 0;
     // LocalIn captures the feedback signal from the previous cycle
 	var sig, env;
     var fbIn = LocalIn.ar(2);
@@ -84,23 +79,35 @@ SynthDef("chaosc", {
     var fsigs = SinOsc.ar([freqA, freqB] + (fbIn.reverse * [modBtoA*depth, modAtoB*depth]));
     // Send the signals back into the feedback loop
     LocalOut.ar(fsigs);
-	sig = 0.5 * (fsigs[0] + fsigs[1]);
-	env = EnvGen.kr(Env.asr(0, 1, 0.2, 'linear'), gate);
-	sig = Pan2.ar(amp * env * sig, pan);
-	Out.ar(outBus, sig);
-	Out.ar(~reverbBus, \rvbSend.kr(0)*sig);
-	Out.ar(~grainBus, \grainSend.kr(0)*sig);
+	sig = \amp.kr(1) * 0.5 * (fsigs[0] + fsigs[1]);
+	sig = RLPF.ar(sig, \cutoff.kr(20000), \resonance.kr(1.0));
+	sig = Pan2.ar(sig, \pan.kr(0));
+	Out.ar(\preFadeBus.kr(9), \preFadeSend.kr(0)*sig);
+	env = EnvGen.kr(Env.asr(\attackT.kr(0), 1, \decayT.kr(0.2), 'linear'), gate);
+	sig = env * sig;
+	Out.ar(\outBus.kr(0), sig);
+	Out.ar(\postFadeBus.kr(11), \postFadeSend.kr(0)*sig);
 }).add;
 )
 
-~s1 = Synth("chaosc", [\freqA, 16, \freqB, 37, \depth, 1]);
+~synthGrp.dumpTree
+~fXGrp.dumpTree
+~reverbBus
+~s1 = Synth("chaosc", [\preFadeBus, ~grainBus, \postFadeBus, ~reverbBus , \freqA, 16, \freqB, 37, \depth, 1], ~synthGrp);
 ~s1.set(\gate, 1)
 ~s1.set(\gate, 0)
 ~s1.set(\depth, 1.2)
 ~s1.set(\pan, -0.5)
-~s2.set(\modAtoB, 200)
-~s2.set(\modBtoA, 406)
+~s1.set(\cutoff, 400);
+~s1.set(\resonance, 0.8);
+~s1.set(\postFadeSend, 0.1);
+~s1.set(\preFadeSend, 0);
+~s1.set(\modAtoB, 100)
+~s1.set(\modBtoA, 200)
 ~s1.free
+
+{Out.kr(0, SinOsc.kr(0.5))}.play
+{Out.kr(1, 150 + 40 * SinOsc.kr(0.5))}.play
 
 ~s1.nodeID
 (
@@ -113,7 +120,7 @@ p = Pbind(
 ).play;
 )
 p.stop
-~s2 = Synth("chaosc", [\freqA, 17, \freqB, 45, \modAtoB, 90, \modBtoA, 241, \depth, 1]);
+~s2 = Synth("chaosc", [\freqA, 17, \freqB, 45, \modAtoB, 90, \modBtoA, 241, \depth, 1], ~synthGrp);
 ~s2.set(\gate, 1)
 ~s2.set(\gate, 0)
 ~s2.set(\depth, 0.9)
@@ -125,68 +132,174 @@ p.stop
 
 // Run the routine
 (
-~r3 = Routine({
+~dataBusSender = Routine({
     // Convert the Env into a stream
-	var envStream = Env(~v1, [10], \lin).circle(2).asStream;
- 	var envStream2 = Env(~v2, [4], \lin).circle(2).asStream;
-   var val, val2;
+	var dataEnv = Env(~v1, [10], \lin);
+	var envStream = dataEnv.asStream;
+	var val, val2;
 
     // Loop while values are still being generated
-    while { (val = envStream.value).notNil} {
+    loop {
+		val = envStream.next;
 		val2 = 5 * (val - 1.5); // Print current envelope value to post window
-		val2.postln;
 		~s2.set(\depth, val2);
-		//~s2.set(\modBtoA, val2);
-        0.1.wait;     // Wait for 1 beat before next value
+		s.bind { ~dataInBus.set(val2) };
+		if (thisThread.beats > e.endBeat) { envStream = dataEnv.asStream; }
+        0.1.wait;
     };
 }).play;
 )
+
 ~r3.stop
 ~r3.free;
 s.freeAll
+(
+f = Routine({
+	var env = Env([0, 1, 0], [5, 5]);
+	e = env.asStream;
+	loop {
+		e.value.post;
+		' '.post;
+		e.endBeat.post;
+		' '.post;
+		thisThread.beats.postln;
+		0.1.wait;
+		if (thisThread.beats > e.endBeat) { e = env.asStream; }
+	}
+}).play;
 
-{LPF.ar(Saw.ar(200, 0.1), SinOsc.kr(XLine.kr(0.7, 300, 20), 0, 3600, 4000)) }.play;
+)
+f.reset
 
+/*
+in supercollider what's the best way to get a smooth control signal from an array of values
+
+It depends on how you want to move through the array. These are the main options, roughly in order of how often you'll want them.
+1. Time-based, one-shot: Env + EnvGen
+
+Use this when the values should unfold over time with shaped transitions.
+supercollider
 
 (
-~notes = Array.fill(128, nil);
-
-MIDIdef.noteOn(\on, {
-	arg val, num;
-	~notes.put(
-		num,
-		Synth("chaosc", [
-			\freq, num.midicps,
-			\harm, 20,
-			\amp, val.linlin(0,127,-30, -6).dbamp,
-			\gate, 1
-		]);
-	);
-});
-
-MIDIdef.noteOff(\off, {
-	arg val, num;
-	~notes[num].set(\gate, 0);
-	~notes[num] = nil;
-});
+{
+    var vals = [200, 800, 400, 1200, 300];
+    var env = Env(vals, [0.5, 1, 0.25, 2], \sin);   // or \lin, \exp, a number for curvature
+    var freq = EnvGen.kr(env, doneAction: 2);
+    SinOsc.ar(freq) * 0.1
+}.play
 )
 
+\sin gives smooth S-curves between points. \exp sounds more natural for frequencies (all values must be > 0), and a number like -4 gives custom curvature. Env.xyc lets you set a curve per segment.
+2. Looping or endless: DemandEnvGen
+
+This works like an envelope, but it reads its levels and durations from demand UGens, so it can cycle forever:
+supercollider
 
 (
-SynthDef(\fm, {
-	var sig, mod, env, ienv;
-	ienv = Env([1,\ipeak.ir(7),1], [\iatk.ir(0.01),\irel.ir(0.2)], [1,-3]).ar;
-	env = Env([0,1,0], [\atk.ir(0.01),\rel.ir(3)], [1,-1]).ar(0.2);
-	mod = SinOsc.ar(
-		\freq.kr(400) * \ratio.kr(2),
-		mul:\freq.kr(400) * \ratio.kr(2) * ienv
-	);
-	sig = SinOsc.ar(\freq.kr(400) + mod);
-	sig = Pan2.ar(sig, \pan.kr(0), \amp.kr(0.1));
-	sig = sig * env;
-	Out.ar(\out.ir(0), sig);
+{
+    var freq = DemandEnvGen.kr(
+        Dseq([200, 800, 400, 1200, 300], inf),
+        Dseq([0.5, 1, 0.25], inf),
+        shape: Env.shapeNumber(\sin)
+    );
+    SinOsc.ar(freq) * 0.1
+}.play
+)
+
+You can swap Dseq for Drand, Dxrand, or Dwhite to get random smooth walks.
+3. Position-based lookup: IEnvGen or SelectX
+
+Use this when another signal (an LFO, a mouse position, a phasor) should scan through the array:
+supercollider
+
+(
+{
+    var vals = [200, 800, 400, 1200, 300];
+    var pos = LFTri.kr(0.2).range(0, vals.size - 1);
+    var freq = IEnvGen.kr(Env(vals, 1 ! (vals.size - 1), \sin), pos);
+    // or linear crossfade: SelectX.kr(pos, vals)
+    SinOsc.ar(freq) * 0.1
+}.play
+)
+
+For long arrays, you can load them into a Buffer and use BufRd.kr(1, buf, phase, interpolation: 4) for cubic interpolation.
+4. Stepped values plus smoothing
+
+This is quick and flexible. Step through the values with Duty, then smooth the steps with Lag, VarLag, or Lag3:
+supercollider
+
+freq = Lag3.kr(Duty.kr(0.25, 0, Dseq(vals, inf)), 0.2);
+
+This gives an "approach" feel rather than exact arrival times. VarLag also takes a curve argument.
+Changing the array at runtime
+
+Use an array control with a fixed size, then .set it from the language:
+supercollider
+
+SynthDef(\sm, { |dur = 1|
+    var vals = \vals.kr([200, 800, 400, 1200]);
+    var freq = DemandEnvGen.kr(Dseq(vals, inf), dur, Env.shapeNumber(\sin));
+    Out.ar(0, SinOsc.ar(freq) * 0.1 ! 2);
+}).add;
+
+x = Synth(\sm);
+x.set(\vals, [300, 600, 900, 450]);
+
+For patterns on the language side, Pseg does the same job as Env, interpolating values over time inside a Pbind.
+
+Rule of thumb: use Env/EnvGen for a fixed gesture, DemandEnvGen for something that loops or evolves, and IEnvGen/SelectX when you want to scrub through the array with another signal.
+
+
+Create a control bus, call .set on it from inside the routine, and read it on the server with In.kr or by mapping a synth argument to it.
+supercollider
+*/
+s.boot;
+
+// 1. Allocate a control bus
+~bus = Bus.control(s, 1);
+
+// 2. A synth that reads from the bus
+(
+SynthDef(\sine, { |out = 0, freq = 440, amp = 0.1|
+    Out.ar(out, SinOsc.ar(freq.lag(0.05)) * amp ! 2);
 }).add;
 )
+
+~synth = Synth(\sine);
+~synth.map(\freq, ~bus);   // freq now follows the bus
+
+// 3. A routine that writes a stream of values to the bus
+(
+~r = Routine {
+    var stream = Pwhite(200, 800).asStream;   // any stream/data source
+    loop {
+        s.bind { ~bus.set(stream.next) };      // timestamped write
+        0.1.wait;
+    }
+}.play;
+)
+
+// stop / clean up
+~r.stop; ~synth.free; ~bus.free;
+/*
+Some notes:
+
+    Why s.bind? On its own, ~bus.set(val) sends the /c_set message right away, so the timing jitters with the language clock. Wrapping it in s.bind { } gives the message the server's latency timestamp. That keeps the timing tight, and in sync with any patterns you have running.
+    Other ways to read the bus:
+        Inside a SynthDef: In.kr(~bus), or pass the bus in as an argument: In.kr(\busIn.kr).
+        When creating a synth: Synth(\sine, [\freq, ~bus.asMap]).
+    Multichannel data: use Bus.control(s, n) and write with ~bus.setn([v1, v2, v3]).
+    Smoothing: bus values jump from step to step. Add .lag or Lag.kr on the reading side, as in the example, to avoid zipper noise.
+    Checking values from the language: ~bus.get { |v| v.postln } works on any server. ~bus.getSynchronous only works on the local server with shared memory.
+*/
+
+
+
+
+{
+	SinOsc.kr(
+
+{LPF.ar(Saw.ar(200, 0.1), SinOsc.kr(XLine.kr(0.7, 300, 20), 0, 3600, 4000)) }.play;
 
 (
 Ndef(\xfm, {
@@ -221,58 +334,6 @@ SynthDef(\fm, {
 )
 Synth(\fm, [\freq, 100, \ratio, 1.7]);
 
-(
-// the arg direct will control the proportion of direct to processed signal
-SynthDef("tutorial-DecayPink", { arg outBus = 0, effectBus, direct = 0.5;
-    var source;
-    // Decaying pulses of PinkNoise. We'll add reverb later.
-    source = Decay2.ar(Impulse.ar(1, 0.25), 0.01, 0.2, PinkNoise.ar);
-    // this will be our main output
-    Out.ar(outBus, source * direct);
-    // this will be our effects output
-    Out.ar(effectBus, source * (1 - direct));
-}).add;
-
-SynthDef("tutorial-DecaySin", { arg outBus = 0, effectBus, direct = 0.5;
-    var source;
-    // Decaying pulses of a modulating sine wave. We'll add reverb later.
-    source = Decay2.ar(Impulse.ar(0.3, 0.25), 0.3, 1, SinOsc.ar(SinOsc.kr(0.2, 0, 110, 440)));
-    // this will be our main output
-    Out.ar(outBus, source * direct);
-    // this will be our effects output
-    Out.ar(effectBus, source * (1 - direct));
-}).add;
-
-SynthDef("tutorial-Reverb", { arg outBus = 0, inBus;
-    var input;
-    input = In.ar(inBus, 1);
-
-    // a low-rent reverb
-    // aNumber.do will evaluate its function argument a corresponding number of times
-    // {}.dup(n) will evaluate the function n times, and return an Array of the results
-    // The default for n is 2, so this makes a stereo reverb
-    16.do({ input = AllpassC.ar(input, 0.04, { Rand(0.001,0.04) }.dup, 3)});
-
-    Out.ar(outBus, input);
-}).add;
-
-b = Bus.audio(s,1); // this will be our effects bus
-)
-
-(
-x = Synth.new("tutorial-Reverb", [\inBus, b]);
-y = Synth.before(x, "tutorial-DecayPink", [\effectBus, b]);
-z = Synth.before(x, "tutorial-DecaySin", [\effectBus, b, \outBus, 1]);
-)
-
-// Change the balance of wet to dry
-y.set(\direct, 1); // only direct PinkNoise
-z.set(\direct, 1); // only direct Sine wave
-y.set(\direct, 0); // only reverberated PinkNoise
-z.set(\direct, 0); // only reverberated Sine wave
-x.free; y.free; z.free; b.free;
-
-
 b = Buffer.read(s, Platform.resourceDir +/+ "sounds/a11wlk01-44_1.aiff");
 
 (  // basic granulation
@@ -284,20 +345,6 @@ b = Buffer.read(s, Platform.resourceDir +/+ "sounds/a11wlk01-44_1.aiff");
 
 }.play
 )
-(
-SynthDef(\gatedSine, {
-  arg freq = 440, gate = 0; // Note how gate here is set to zero
-  var env, sig;
-	env = EnvGen.kr(Env.asr(20, 1, 4, 'linear'), gate);
-  sig = SinOsc.ar(freq);
-  Out.ar(0, sig * env ! 2);
-}).add;
-)
-~s1 = Synth(\gatedSine);
-~s1.set(\gate, 1);
-2]:
-~s1.free
-~s1.set(\gate, 0);
 
 (
 Ndef(\xfm, { arg freqA = 16, freqB = 9, modAtoB=133, modBtoA=137;

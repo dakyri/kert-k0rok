@@ -114,7 +114,8 @@ s.waitForBoot({
 		type: \composite,
 		baseFreqA: 16,
 		baseFreqB: 9,
-		freqRatios: [1, 16/15, 9/8, 6/5, 5/4, 4/3, 3/2, 7/4, 2, 5/2, 3],
+		freqRatios: [1, 16/15, 9/8, 6/5, 5/4, 4/3, 3/2, 7/4, 2,   5/2],
+		freqRatios: [0.1, 0.1, 0.2, 0.1, 0.2, 0.1, 0.0.05, 0.05, 0.05, 0.05],
 		baseModAtoB: 133,
 		baseModBtoA: 137,
 		init: { |self| },
@@ -130,8 +131,11 @@ s.waitForBoot({
          *      - pan (random centre, fast wobbke +- 0.05
          */
 		spawn: { |self|
-			var syn = Synth("chaosc", [\preFadeBus, ~grainBus, \postFadeBus, ~reverbBus ,
-				\freqA, 16, \freqB, 37, \depth, 1, \pan -0.1]);
+			var syn = Synth("chaosc", [
+				\freqA, self.baseFreqA * self.freqRatios.wchoose(self.freqWeights),
+				\freqB, self.baseFreqB * self.freqRatios.wchoose(self.freqWeights),
+				\postFadeBus, ~reverbBus, \postFadeSend, 0.3, \preFadeBus, ~grainBus,
+				\depth, 1, \pan -0.1]);
 			var pat1 = Pbind(type: \set, id: syn, args: [\gate], gate: Pseq([1, 0], inf),
 				dur: 1).play;
 			var pat2 = nil;

@@ -80,7 +80,7 @@ s.waitForBoot({
 	}).add;
 
 	SynthDef("rawlf", {
-		Out.kr(\lfoBus, SinOsc.ar(\beatFreq.kr(1)/\tempo.kr(1)));
+		Out.kr(\lfoBus.kr(0), SinOsc.ar(\beatFreq.kr(1)/\tempo.kr(1)));
 	}).add;
 
 	s.sync;
@@ -115,9 +115,11 @@ s.waitForBoot({
 		baseFreqA: 16,
 		baseFreqB: 9,
 		freqRatios: [1, 16/15, 9/8, 6/5, 5/4, 4/3, 3/2, 7/4, 2,   5/2],
-		freqRatios: [0.1, 0.1, 0.2, 0.1, 0.2, 0.1, 0.0.05, 0.05, 0.05, 0.05],
+		freqWeights: [0.1, 0.1, 0.2, 0.1, 0.2, 0.1, 0.05, 0.05, 0.05, 0.05],
 		baseModAtoB: 133,
 		baseModBtoA: 137,
+		players: List.new(),
+
 		init: { |self| },
 		/*!
          * launch a synth, associated patterns and lfos
@@ -136,9 +138,13 @@ s.waitForBoot({
 				\freqB, self.baseFreqB * self.freqRatios.wchoose(self.freqWeights),
 				\postFadeBus, ~reverbBus, \postFadeSend, 0.3, \preFadeBus, ~grainBus,
 				\depth, 1, \pan -0.1]);
-			var pat1 = Pbind(type: \set, id: syn, args: [\gate], gate: Pseq([1, 0], inf),
+			var pat = Pbind(type: \set, id: syn, args: [\gate], gate: Pseq([1, 0], inf),
 				dur: 1).play;
-			var pat2 = nil;
+			var player = (
+				type: \composite,
+				synth: syn,
+				pattern: pat
+			);
 		},
 		/*! stop and cleanup a particular synth, and associated patterns and lfos */
 		cull: { |self| },
@@ -147,6 +153,11 @@ s.waitForBoot({
 	)
 })
 )
+~k0rok.freq
+~k0rok.baseFreqA
+~k0rok.freqRatios.wchoose(~k0rok.freqWeights)
+~k0rok.spawn
+
 16/15
 TempoClock.default.tempo.postln;
 (

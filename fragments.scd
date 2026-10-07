@@ -182,7 +182,11 @@ t.next
     }
 }.play;
 )
-
+z = List.new()
+z.add(9)
+z.postln
+z[3]
+z[0]
 // stop / clean up
 ~r.stop; ~synth.free; ~bus.free;
 /*
@@ -196,9 +200,6 @@ Some notes:
     Smoothing: bus values jump from step to step. Add .lag or Lag.kr on the reading side, as in the example, to avoid zipper noise.
     Checking values from the language: ~bus.get { |v| v.postln } works on any server. ~bus.getSynchronous only works on the local server with shared memory.
 */
-
-
-
 
 {
 	SinOsc.kr(

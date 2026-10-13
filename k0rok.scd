@@ -49,24 +49,24 @@ s.waitForBoot({
 
 	// spacey grains!
 	SynthDef("clouds", {
-		arg inBus = 9, outBus = 0, pitch = 0, size = 0, texture = 0.5, mix = 1, reverb = 0.5, fb = 0;
 		var sig, wet, dens, pos;
-		sig = In.ar(inBus, 2);
+		sig = In.ar(\inBus.kr(9), 2);
 		dens = LFNoise1.kr(0.3).range(0.3, 0.45);
 		pos = LFNoise1.kr(0.3).range(0, 1);
-		wet = MiClouds.ar(sig, pit: pitch, pos: pos, size: size, dens: dens, tex: texture, drywet: mix,
-			spread: 1, rvb: reverb, fb: fb, mode: 0);
-		Out.ar(outBus, wet);
+		wet = MiClouds.ar(sig, pit: \pitch.kr(0), pos: pos, size: \size.kr(0), dens: dens,
+			tex: \texture.kr(0.5), drywet: \mix.kr(1),
+			spread: 1, rvb: \reverb.kr(0.5), fb: \fb.kr(0), mode: 0);
+		Out.ar(\outBus.kr(0), wet);
 	}).add;
 
 	// main synth
 	SynthDef("chaosc", {
-		arg freqA = 16, freqB = 9, modAtoB = 133, modBtoA = 137, depth = 1, gate = 0;
+		arg freqA = 16, freqB = 9, modAtoB = 133, modBtoA = 137, x_depth = 1, gate = 0;
 		// LocalIn captures the feedback signal from the previous cycle
 		var sig, env;
 		var fbIn = LocalIn.ar(2);
 		// Cross-modulate the frequencies of two sine oscillators
-		var fsigs = SinOsc.ar([freqA, freqB] + (fbIn.reverse * [modBtoA*depth, modAtoB*depth]));
+		var fsigs = SinOsc.ar([freqA, freqB] + (fbIn.reverse * [modBtoA*x_depth, modAtoB*x_depth]));
 		// Send the signals back into the feedback loop
 		LocalOut.ar(fsigs);
 		sig = \amp.kr(1) * 0.5 * (fsigs[0] + fsigs[1]);
@@ -138,13 +138,36 @@ s.waitForBoot({
 				\freqB, self.baseFreqB * self.freqRatios.wchoose(self.freqWeights),
 				\postFadeBus, ~reverbBus, \postFadeSend, 0.3, \preFadeBus, ~grainBus,
 				\depth, 1, \pan -0.1]);
-			var pat = Pbind(type: \set, id: syn, args: [\gate], gate: Pseq([1, 0], inf),
-				dur: 1).play;
-			var player = (
+			var handle = (
 				type: \composite,
-				synth: syn,
-				pattern: pat
+				synth_n: syn,
+				tos: { | self, nm | (nm ++ '_' ++ syn.nodeID).asSymbol; },
+				ssy: { | self, x, y | self.synth_n.set(x, y);				},
+				pattern: Pbind(type: \set),
+				pruner: nil,
+				state: 'planted',
+				init: { | self |
+					var panc = Rand(-0.9, 0.9);
+					var pat = Pbind(type: \set, id: syn, args: [\gate, \pan, \cutoff, \x_depth],
+						gate: Pseq([1, 0], inf),
+						x_depth: Ndef(self.tos('x_lf'), { SinOsc.kr(1/16).linexp(-1, 1, 0.8, 1.4)}),
+						pan: Ndef(self.tos('pan_lf'), { SinOsc.kr(4).linlin(-1, 1, panc-0.1, panc+0.1)}),
+						dur: Pseq([2, 3], inf)
+					).play;
+					self.pattern = pat;
+					self.state = 'flowering';
+					self;
+				},
+				prune: { | self, t |
+					Ndef(self.tos('pan_lf')).clear;
+					Ndef(self.tos('x_lf')).clear;
+					self.pattern.stop;
+					self.pattern.free;
+					self.synth_n.free;
+					self.state = 'compost';
+				}
 			);
+			handle.init();
 		},
 		/*! stop and cleanup a particular synth, and associated patterns and lfos */
 		cull: { |self| },
@@ -153,11 +176,26 @@ s.waitForBoot({
 	)
 })
 )
+a = Pwhite(0.0, 1.0, inf);
+a.value
+a.(2)
+a = (type: \composite, tos: { | self, n| (n ++ 'a'); })
+a.tos('x')
 ~k0rok.freq
 ~k0rok.baseFreqA
 ~k0rok.freqRatios.wchoose(~k0rok.freqWeights)
-~k0rok.spawn
-
+p = ~k0rok.spawn
+q = ~k0rok.spawn
+p.set_n(\gate, 1)
+p.pattern.free
+Ndef(p.tos('panlf')).clear
+p.prune
+p.tos('x')
+p.synth_n.free
+.set(\freq, 700);
+p.tos('lfo1')
+a = (x: 6, y: 7, shit: { |self| self.x.postln; self.y = self.y + 1; });
+a.shit
 16/15
 TempoClock.default.tempo.postln;
 (
@@ -169,6 +207,7 @@ TempoClock.default.tempo.postln;
 ~s1.
 Ndef(\lfo2, { ~lfo1Bus.kr(1).exprange(100, 2000) })
 Ndef(\lfo3, { SinOsc.kr(0.1) });
+(
 ~s1.set(\depth, -1)
 ~s1.set(\cutoff, 590)
 ~s1.map(\cutoff, Ndef(\lfo2, { SinOsc.kr(0.25).exprange(200, 600)}).asBus)

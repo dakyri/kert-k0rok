@@ -61,8 +61,8 @@ s.waitForBoot({
 	// main synth
 	SynthDef("chaosc", {
 		arg freqA = 16, freqB = 9, modAtoB = 133, modBtoA = 137, x_depth = 1, gate = 0;
+		var sig, env, pfd_env;
 		// LocalIn captures the feedback signal from the previous cycle
-		var sig, env;
 		var fbIn = LocalIn.ar(2);
 		// Cross-modulate the frequencies of two sine oscillators
 		var fsigs = SinOsc.ar([freqA, freqB] + (fbIn.reverse * [modBtoA*x_depth, modAtoB*x_depth]));
@@ -71,8 +71,9 @@ s.waitForBoot({
 		sig = \amp.kr(1) * 0.5 * (fsigs[0] + fsigs[1]);
 		sig = RLPF.ar(sig, \cutoff.kr(20000), \resonance.kr(1.0));
 		sig = Pan2.ar(sig, \pan.kr(0));
-		Out.ar(\preFadeBus.kr(9), \preFadeSend.kr(0)*sig);
 		env = EnvGen.kr(Env.asr(\attackT.kr(0), 1, \decayT.kr(0.2), 'linear'), gate);
+		pfd_env = \preFadeSend.kr(0).lag(\preFadeLag.kr(1));
+		Out.ar(\preFadeBus.kr(9), pfd_env * sig);
 		sig = env * sig;
 		Out.ar(\outBus.kr(0), sig);
 		Out.ar(\postFadeBus.kr(11), \postFadeSend.kr(0)*sig);
@@ -167,14 +168,24 @@ s.waitForBoot({
 					self.state = 'flowering';
 					self;
 				},
-				prune: { | self, t |
-					Ndef(self.tos('pan_lf')).clear;
-					Ndef(self.tos('x_lf')).clear;
-					Ndef(self.tos('cutoff_lf')).clear;
-					self.pattern.stop;
-					self.pattern.free;
-					self.synth_n.free;
-					self.state = 'compost';
+				prune: { | self, prune_t = 0 |
+					self.pruner = Routine({
+						/* maybe find a way to wait until our env is 0 */
+						self.pattern.stop;
+						self.pattern.free;
+						prune_t.yield;
+						/*loop {
+							delta = rrand(1, 3) * 0.5;
+							"Will wait ".post;
+							delta.postln;
+							delta.yield;
+						}*/
+						Ndef(self.tos('pan_lf')).clear;
+						Ndef(self.tos('x_lf')).clear;
+						Ndef(self.tos('cutoff_lf')).clear;
+						self.synth_n.free;
+						self.state = 'compost';
+					}).play;
 				}
 			);
 			handle.init();
@@ -186,16 +197,7 @@ s.waitForBoot({
 	)
 })
 )
-f = { | x | const z = 2; z; }
-x=0.1
-x
-rrand(x - 1, 1 - x)
-rrand(-1,1.0)
-a = Pwhite(0.0, 1.0, inf);
-a.value
-a.(2)
-a = (type: \composite, tos: { | self, n| (n ++ 'a'); })
-a.tos('x')
+
 ~k0rok.freq
 ~k0rok.baseFreqA
 ~k0rok.freqRatios.wchoose(~k0rok.freqWeights)
@@ -207,12 +209,7 @@ Ndef(p.tos('panlf')).clear
 p.prune
 p.tos('x')
 p.synth_n.free
-.set(\freq, 700);
-p.tos('lfo1')
-a = (x: 6, y: 7, shit: { |self| self.x.postln; self.y = self.y + 1; });
-a.shit
-16/15
-TempoClock.default.tempo.postln;
+
 (
 ~s1 = Synth("chaosc", [\preFadeBus, ~grainBus, \postFadeBus, ~reverbBus , \freqA, 16, \freqB, 37, \depth, 1,
 	\pan -0.1])
@@ -281,16 +278,3 @@ p.stop
 ~s2.set(\modAtoB, 116)
 ~s2.set(\modBtoA, 406)
 ~s2.free
-
-(
-f = Routine({|x|
-	var delta;
-	loop {
-		delta = rrand(1, 3) * 0.5;
-		"Will wait ".post;
-		delta.postln;
-		delta.yield;
-	}
-}).play;
-)
-

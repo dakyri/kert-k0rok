@@ -1,14 +1,4 @@
-(
-f = Routine({|x|
-	var delta;
-	loop {
-		delta = rrand(1, 3) * 0.5;
-		"Will wait ".post;
-		delta.postln;
-		delta.yield;
-	}
-}).play;
-)
+// scatch pad and a few cut-paste solutions
 
 ~r3.stop
 ~r3.free;
@@ -212,14 +202,11 @@ Some notes:
     Checking values from the language: ~bus.get { |v| v.postln } works on any server. ~bus.getSynchronous only works on the local server with shared memory.
 */
 
-{
-	SinOsc.kr(
 
 {LPF.ar(Saw.ar(200, 0.1), SinOsc.kr(XLine.kr(0.7, 300, 20), 0, 360, 40)) }.play;
 
 {HPF.ar(Saw.ar(200, 0.1), XLine.kr(10, 18000, 10)) }.play;
 
-(
 
 (
 Ndef(\xfm, {
@@ -233,6 +220,8 @@ Ndef(\xfm, {
     sigs * 0.5;
 }).play;
 )
+
+
 
 (
 SynthDef(\fm, {
@@ -276,6 +265,16 @@ Ndef(\xfm, { arg freqA = 16, freqB = 9, modAtoB=133, modBtoA=137;
 )
 
 
-
+(
+f = Routine({|x|
+	var delta;
+	loop {
+		delta = rrand(1, 3) * 0.5;
+		"Will wait ".post;
+		delta.postln;
+		delta.yield;
+	}
+}).play;
+)
 // Make sure the server is booted
 s.boot;

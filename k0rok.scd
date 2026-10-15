@@ -39,12 +39,11 @@ s.waitForBoot({
 	//  \room
 	//  \damp
 	SynthDef("freeverb", {
-		arg inBus = 9, outBus = 0;
 		var sig, wet;
-		sig = In.ar(inBus, 2);
+		sig = In.ar(\inBus.kr(9), 2);
 		wet = FreeVerb2.ar(sig[0], sig[1],
 			mix: \wetAmp.kr(0.3), room: \room.kr(1.0), damp: \damp.kr(0.85));
-		Out.ar(outBus, wet);
+		Out.ar(\outBus.kr(0), wet);
 	}).add;
 
 	// spacey grains!
@@ -142,16 +141,26 @@ s.waitForBoot({
 				type: \composite,
 				synth_n: syn,
 				tos: { | self, nm | (nm ++ '_' ++ syn.nodeID).asSymbol; },
-				ssy: { | self, x, y | self.synth_n.set(x, y);				},
+				ssy: { | self, x, y | self.synth_n.set(x, y); },
 				pattern: Pbind(type: \set),
 				pruner: nil,
 				state: 'planted',
 				init: { | self |
-					var panc = Rand(-0.9, 0.9);
-					var pat = Pbind(type: \set, id: syn, args: [\gate, \pan, \cutoff, \x_depth],
+					var pan_w = 0.3;
+					var panc = rrand(pan_w - 1, 1 - pan_w);
+					var x_lfrate = 1/16;
+					var pan_lfrate = 1;
+					var cutoff_lfrate = 1/8;
+					var pat;
+					panc.postln;
+					pat = Pbind(type: \set, id: syn, args: [\gate, \pan, \cutoff, \x_depth],
 						gate: Pseq([1, 0], inf),
-						x_depth: Ndef(self.tos('x_lf'), { SinOsc.kr(1/16).linexp(-1, 1, 0.8, 1.4)}),
-						pan: Ndef(self.tos('pan_lf'), { SinOsc.kr(4).linlin(-1, 1, panc-0.1, panc+0.1)}),
+						x_depth: Ndef(self.tos('x_lf'),
+							{ SinOsc.kr(x_lfrate).linexp(-1, 1, 0.8, 1.4)}),
+						pan: Ndef(self.tos('pan_lf'),
+							{ SinOsc.kr(pan_lfrate).linlin(-1, 1, panc - pan_w, panc + pan_w)}),
+						cutoff: Ndef(self.tos('cutoff_lf'),
+							{ SinOsc.kr(cutoff_lfrate).linlin(-1, 1, 100, 4500) }),
 						dur: Pseq([2, 3], inf)
 					).play;
 					self.pattern = pat;
@@ -161,6 +170,7 @@ s.waitForBoot({
 				prune: { | self, t |
 					Ndef(self.tos('pan_lf')).clear;
 					Ndef(self.tos('x_lf')).clear;
+					Ndef(self.tos('cutoff_lf')).clear;
 					self.pattern.stop;
 					self.pattern.free;
 					self.synth_n.free;
@@ -176,6 +186,11 @@ s.waitForBoot({
 	)
 })
 )
+f = { | x | const z = 2; z; }
+x=0.1
+x
+rrand(x - 1, 1 - x)
+rrand(-1,1.0)
 a = Pwhite(0.0, 1.0, inf);
 a.value
 a.(2)
@@ -245,23 +260,6 @@ Ndef(\lfo4, { SinOsc.kr(0.1) })
 
 {Out.kr(0, SinOsc.kr(0.5))}.play
 {Out.kr(1, 150 + 40 * SinOsc.kr(0.5))}.play
-(
-	~dataBusSender = Routine({
-		// Convert the Env into a stream
-		var dataEnv = Env(~v1, [10], \lin);
-		var envStream = dataEnv.asStream;
-		var val, val2;
-
-		// Loop while values are still being generated
-		loop {
-			val = envStream.next;
-			val2 = 5 * (val - 1.5); // Print current envelope value to post window
-			s.bind { ~dataInBus.set(val2) }; // s.bind will timestamp the stream, reducing jitter
-			if (thisThread.beats > e.endBeat) { envStream = dataEnv.asStream; };
-		0.1.wait;
-		};
-	});
-)
 
 // NOTE TO SELF. set needs the \args to be specific for gates parameters to work
 (
@@ -283,4 +281,16 @@ p.stop
 ~s2.set(\modAtoB, 116)
 ~s2.set(\modBtoA, 406)
 ~s2.free
+
+(
+f = Routine({|x|
+	var delta;
+	loop {
+		delta = rrand(1, 3) * 0.5;
+		"Will wait ".post;
+		delta.postln;
+		delta.yield;
+	}
+}).play;
+)
 

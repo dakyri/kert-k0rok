@@ -10,6 +10,7 @@ s.waitForBoot({
 		ServerQuit.removeAll;
 		ServerTree.removeAll;
 		CmdPeriod.removeAll;
+		if (~k0rok != nil, ~k0rok.cull, "No loose bits".postln);
 		"cleaned up...".postln;
 	};
 	ServerQuit.add(~cleanup);
@@ -60,19 +61,20 @@ s.waitForBoot({
 
 	// main synth
 	SynthDef("chaosc", {
-		arg freqA = 16, freqB = 9, modAtoB = 133, modBtoA = 137, x_depth = 1, gate = 0;
+		arg freqA = 90, freqB = 303, x_depth = 0.1, fb_depth = 0, gate = 0;
 		var sig, env, pfd_env;
 		// LocalIn captures the feedback signal from the previous cycle
+		//var fbIn = LeakDC.ar(LocalIn.ar(2), coef: 0.9995);
 		var fbIn = LocalIn.ar(2);
 		// Cross-modulate the frequencies of two sine oscillators
-		var fsigs = SinOsc.ar([freqA, freqB] + (fbIn.reverse * [modBtoA*x_depth, modAtoB*x_depth]));
+		var fsigs = SinOsc.ar([freqA, freqB] * ((1 + ((fbIn.reverse * x_depth) + (fbIn * fb_depth)).tanh)));
 		// Send the signals back into the feedback loop
 		LocalOut.ar(fsigs);
 		sig = \amp.kr(1) * 0.5 * (fsigs[0] + fsigs[1]);
 		sig = RLPF.ar(sig, \cutoff.kr(20000), \resonance.kr(1.0));
 		sig = Pan2.ar(sig, \pan.kr(0));
 		env = EnvGen.kr(Env.asr(\attackT.kr(0), 1, \decayT.kr(0.2), 'linear'), gate);
-		pfd_env = \preFadeSend.kr(0).lag(\preFadeLag.kr(1));
+		pfd_env = \preFadeSend.kr(0).lag(\preFadeLag.kr(1)) * (1 - env);
 		Out.ar(\preFadeBus.kr(9), pfd_env * sig);
 		sig = env * sig;
 		Out.ar(\outBus.kr(0), sig);
@@ -112,12 +114,10 @@ s.waitForBoot({
 
 	~k0rok = (
 		type: \composite,
-		baseFreqA: 16,
-		baseFreqB: 9,
-		freqRatios: [1, 16/15, 9/8, 6/5, 5/4, 4/3, 3/2, 7/4, 2,   5/2],
-		freqWeights: [0.1, 0.1, 0.2, 0.1, 0.2, 0.1, 0.05, 0.05, 0.05, 0.05],
-		baseModAtoB: 133,
-		baseModBtoA: 137,
+		baseFreqA: 90,
+		baseFreqB: 303,
+		freqRatios:  [1, 16/15, 9/8, 11/8, 6/5],
+		freqWeights: [0.2, 0.2, 0.2, 0.2, 0.2],
 		players: List.new(),
 
 		init: { |self| },
@@ -133,16 +133,18 @@ s.waitForBoot({
          *      - pan (random centre, fast wobbke +- 0.05
          */
 		spawn: { |self|
+			var freqA = self.baseFreqA * self.freqRatios.wchoose(self.freqWeights);
+			var freqB = self.baseFreqB * self.freqRatios.wchoose(self.freqWeights);
 			var syn = Synth("chaosc", [
-				\freqA, self.baseFreqA * self.freqRatios.wchoose(self.freqWeights),
-				\freqB, self.baseFreqB * self.freqRatios.wchoose(self.freqWeights),
-				\postFadeBus, ~reverbBus, \postFadeSend, 0.3, \preFadeBus, ~grainBus,
-				\depth, 1, \pan -0.1]);
+				\freqA: freqA, \freqB: freqB,
+				postFadeBus: ~reverbBus, postFadeSend: 0.3, preFadeBus: ~grainBus,
+				x_depth: 0.1, pan: 0]);
 			var handle = (
 				type: \composite,
 				synth_n: syn,
 				tos: { | self, nm | (nm ++ '_' ++ syn.nodeID).asSymbol; },
 				ssy: { | self, x, y | self.synth_n.set(x, y); },
+				msy: { | self, x, y | self.synth_n.map(x, y.asBus); },
 				pattern: Pbind(type: \set),
 				pruner: nil,
 				state: 'planted',
@@ -157,11 +159,11 @@ s.waitForBoot({
 					pat = Pbind(type: \set, id: syn, args: [\gate, \pan, \cutoff, \x_depth],
 						gate: Pseq([1, 0], inf),
 						x_depth: Ndef(self.tos('x_lf'),
-							{ SinOsc.kr(x_lfrate).linexp(-1, 1, 0.8, 1.4)}),
+							{ SinOsc.kr(x_lfrate).linlin(-1, 1, 0.01, 0.5)}),
 						pan: Ndef(self.tos('pan_lf'),
 							{ SinOsc.kr(pan_lfrate).linlin(-1, 1, panc - pan_w, panc + pan_w)}),
 						cutoff: Ndef(self.tos('cutoff_lf'),
-							{ SinOsc.kr(cutoff_lfrate).linlin(-1, 1, 100, 4500) }),
+							{ SinOsc.kr(cutoff_lfrate).linexp(-1, 1, 100, 4500) }),
 						dur: Pseq([2, 3], inf)
 					).play;
 					self.pattern = pat;
@@ -188,61 +190,61 @@ s.waitForBoot({
 					}).play;
 				}
 			);
+			self.players.add(handle);
 			handle.init();
 		},
 		/*! stop and cleanup a particular synth, and associated patterns and lfos */
-		cull: { |self| },
+		cull: { |self|
+			self.players.do({|player, i| player.prune;});
+			self.players.reverseDo({|item, i| self.players.pop.postln;});
+		},
 		/*! run a loop that will randomly launch and delete chaosc synths */
 		play: { |self| }
 	)
 })
 )
 
+
 ~k0rok.freq
 ~k0rok.baseFreqA
 ~k0rok.freqRatios.wchoose(~k0rok.freqWeights)
 p = ~k0rok.spawn
-q = ~k0rok.spawn
-p.set_n(\gate, 1)
-p.pattern.free
-Ndef(p.tos('panlf')).clear
 p.prune
-p.tos('x')
-p.synth_n.free
+~k0rok.cull
+p.ssy(\x_depth, 0.1)
+p.ssy(\fb_depth, 0.41)
+p.ssy(\freqA, 27)
+p.ssy(\freqB, 97)
+p.aay(\gate, 0)
+p.ssy(\preFadeSend, 1)
+p.msy(\x_depth, Ndef(\lf, {SinOsc.ar(0.25)* 0.5 + 1.2}))
 
+~clouds.set(\pitch, -3.7)
+
+Ndef(\lf, { SinOsc.ar(5)} )
 (
 ~s1 = Synth("chaosc", [\preFadeBus, ~grainBus, \postFadeBus, ~reverbBus , \freqA, 16, \freqB, 37, \depth, 1,
 	\pan -0.1])
 )
-~lf1 = Synth("rawlf")
+~s1.set(\preFadeSend, 1)
+~s1.set(\gate, 0)
+~s1.set(\x_depth, 1.4)
+~s1.set(\modBtoA, 100)
+~s1.set(\freqA, 17)
+~s1.set(\freqB, 15)
+~s1.map(\x_depth, Ndef(\lfx, { SinOsc.kr(0.3).linlin(-1, 1, 0.3, 2) }).asBus)
+Ndef(\lfx, { SinOsc.kr(0.05).linexp(-1, 1, 1.3, 4) }).asBus
 ~s1.nodeID
-~s1.
-Ndef(\lfo2, { ~lfo1Bus.kr(1).exprange(100, 2000) })
-Ndef(\lfo3, { SinOsc.kr(0.1) });
-(
-~s1.set(\depth, -1)
+~s1.free
+Ndef(\lfx, { ~lfo1Bus.kr(1).exprange(100, 2000) })
+Ndef(\lfx, { SinOsc.kr(0.1) });
 ~s1.set(\cutoff, 590)
 ~s1.map(\cutoff, Ndef(\lfo2, { SinOsc.kr(0.25).exprange(200, 600)}).asBus)
 ~s1.map(\depth, Ndef(\lfo3, { SinOsc.kr(3) + SinOsc.kr(0.09123) }).asBus)
-	~s1.map(\pan, Ndef(\lfo4, { SinOsc.kr(0.1) }).asBus)
-	~s1.set(\pan, 1)
-)
-~s1.set(\, 1)
-(
-p = Pbind(
-	\type, \set,
-	\id, ~s1.nodeID,
-	\preFadeSend, 1
-).play;
-)
-p.stop
-~s1.free
-p.free
-Ndef(\lfo4, { SinOsc.kr(0.1) })
-~synthGrp.dumpTree
-~fXGrp.dumpTree
-~reverbBus
-~synthGrp)2
+~s1.map(\pan, Ndef(\lfo4, { SinOsc.kr(0.1) }).asBus)
+~s1.set(\pan, 1)
+~clouds.set(\pitch, -13)
+~clouds.set(\fb, 0.25)
 ~s1.set(\gate, 1)
 ~s1.set(\gate, 0)
 ~s1.set(\depth, 1.2)
@@ -253,28 +255,3 @@ Ndef(\lfo4, { SinOsc.kr(0.1) })
 ~s1.set(\preFadeSend, 0);
 ~s1.set(\modAtoB, 100)
 ~s1.set(\modBtoA, 200)
-~s1.free
-
-{Out.kr(0, SinOsc.kr(0.5))}.play
-{Out.kr(1, 150 + 40 * SinOsc.kr(0.5))}.play
-
-// NOTE TO SELF. set needs the \args to be specific for gates parameters to work
-(
-p = Pbind(
-    \type, \set,
-    \id, ~s2,
-    \args, [\gate],
-	\gate, Pseq([1, 0], inf),
-	\dur, 1
-).play;
-)
-p.stop
-~s2 = Synth("chaosc", [\freqA, 17, \freqB, 45, \modAtoB, 90, \modBtoA, 241, \depth, 1], ~synthGrp);
-~s2.set(\gate, 1)
-~s2.set(\gate, 0)
-~s2.set(\depth, 0.9)
-~s2.set(\pan, 0.6)
-~s2.set(\freqB, 11)
-~s2.set(\modAtoB, 116)
-~s2.set(\modBtoA, 406)
-~s2.free

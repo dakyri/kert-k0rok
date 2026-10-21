@@ -10,7 +10,7 @@ s.waitForBoot({
 		ServerQuit.removeAll;
 		ServerTree.removeAll;
 		CmdPeriod.removeAll;
-		if (~k0rok != nil, ~k0rok.cull, "No loose bits".postln);
+		if (~k0rok != nil, {~k0rok.cull}, {"No loose bits".postln});
 		"cleaned up...".postln;
 	};
 	ServerQuit.add(~cleanup);
@@ -34,11 +34,7 @@ s.waitForBoot({
 	~v2 = ~csvdata.collect({ |item, i| item[2].asInteger });
 
 	// reverb synth, stereo->stereo
-	//  \inBus - source
-	//  \outBus - destination
-	//  \wetAmp
-	//  \room
-	//  \damp
+	//  \inBus,\outBus,\wetAmp,\room,\damp
 	SynthDef("freeverb", {
 		var sig, wet;
 		sig = In.ar(\inBus.kr(9), 2);
@@ -48,6 +44,7 @@ s.waitForBoot({
 	}).add;
 
 	// spacey grains!
+	//  \inBus,\outBus,\pitch (+/-48),\texture,\fn,\reverb,\size
 	SynthDef("clouds", {
 		var sig, wet, dens, pos;
 		sig = In.ar(\inBus.kr(9), 2);
@@ -59,19 +56,29 @@ s.waitForBoot({
 		Out.ar(\outBus.kr(0), wet);
 	}).add;
 
-	// main synth
+	// main chaos synth. cross and self modulated
+	// \freqA, \freqB - main oscilator frequencies
+	// \x_depth - cross modulation depth
+	// \fb_depth - feedback self modulation depth
+	// \amp, \pan, \gate
+	// \postFadeSend, \postFadeBus - post fade send and destination
+	// \preFadeBus, \preFadeLag, \preFadeSend - pre fade aux. before env, but after filter, gated by (1-env)
+	// \cutoff - [-1, 1] sets range and filter type +ve low pass, -ve high pass, 0 none.
 	SynthDef("chaosc", {
-		arg freqA = 90, freqB = 303, x_depth = 0.1, fb_depth = 0, gate = 0;
+		arg freqA = 90, freqB = 303, x_depth = 0.1, fb_depth = 0, gate = 0, cutoff = 0, resonance = 0.5;
 		var sig, env, pfd_env;
 		// LocalIn captures the feedback signal from the previous cycle
-		//var fbIn = LeakDC.ar(LocalIn.ar(2), coef: 0.9995);
+		//var fbIn = LeakDC .ar(LocalIn.ar(2), coef: 0.9995);
 		var fbIn = LocalIn.ar(2);
 		// Cross-modulate the frequencies of two sine oscillators
-		var fsigs = SinOsc.ar([freqA, freqB] * ((1 + ((fbIn.reverse * x_depth) + (fbIn * fb_depth)).tanh)));
+		var fsigs = SinOsc.ar([freqA, freqB] * ((1 + ((fbIn.reverse * x_depth) + (fbIn * fb_depth))))); // .tanh
 		// Send the signals back into the feedback loop
 		LocalOut.ar(fsigs);
 		sig = \amp.kr(1) * 0.5 * (fsigs[0] + fsigs[1]);
-		sig = RLPF.ar(sig, \cutoff.kr(20000), \resonance.kr(1.0));
+		sig = Select.ar(cutoff.sign + 1, [
+			RHPF.ar(sig, cutoff.linexp(-1, 0, 20000, 20), resonance),
+			sig,
+			RLPF.ar(sig, cutoff.linexp(0, 1, 20000, 20), resonance)]);
 		sig = Pan2.ar(sig, \pan.kr(0));
 		env = EnvGen.kr(Env.asr(\attackT.kr(0), 1, \decayT.kr(0.2), 'linear'), gate);
 		pfd_env = \preFadeSend.kr(0).lag(\preFadeLag.kr(1)) * (1 - env);
@@ -114,13 +121,16 @@ s.waitForBoot({
 
 	~k0rok = (
 		type: \composite,
-		baseFreqA: 90,
-		baseFreqB: 303,
-		freqRatios:  [1, 16/15, 9/8, 11/8, 6/5],
+		baseFreqA: 80,
+		freqRatios:  [1, 33/32, 16/15, 12/11, 9/8, 7/6, 11/9, 6/5],
 		freqWeights: [0.2, 0.2, 0.2, 0.2, 0.2],
+		partch43: [49/48, 33/32, 21/20, 16/15, 12/11, 11/10, 10/9, 9/8, 8/7, 7/6, 32/27, 6/5, 11/9,
+				5/4, 14/11, 9/7, 21/16, 4/3, 15/11, 11/8, 7/5, 10/7, 16/11, 22/15, 3/2, 32/21, 14/9, 11/7, 8/5, 18/11,
+				5/3, 27/16, 12/7, 7/4, 16/9, 9/5, 20/11, 11/6, 15/8, 40/21, 64/33, 96/49,	2/1],
 		players: List.new(),
 
 		init: { |self| },
+
 		/*!
          * launch a synth, associated patterns and lfos
 		 *  - a synth
@@ -134,11 +144,11 @@ s.waitForBoot({
          */
 		spawn: { |self|
 			var freqA = self.baseFreqA * self.freqRatios.wchoose(self.freqWeights);
-			var freqB = self.baseFreqB * self.freqRatios.wchoose(self.freqWeights);
+			var freqB = freqA * self.partch43.choose * [1, 2, 3, 4].wchoose([0.1,0.5,0.3, 0.1]);
 			var syn = Synth("chaosc", [
 				\freqA: freqA, \freqB: freqB,
 				postFadeBus: ~reverbBus, postFadeSend: 0.3, preFadeBus: ~grainBus,
-				x_depth: 0.1, pan: 0]);
+				x_depth: 0.1, fb_depth: 0, pan: 0]);
 			var handle = (
 				type: \composite,
 				synth_n: syn,
@@ -148,28 +158,45 @@ s.waitForBoot({
 				pattern: Pbind(type: \set),
 				pruner: nil,
 				state: 'planted',
+
+				/*! dowa most of the normal running setup here */
 				init: { | self |
 					var pan_w = 0.3;
 					var panc = rrand(pan_w - 1, 1 - pan_w);
-					var x_lfrate = 1/16;
-					var pan_lfrate = 1;
-					var cutoff_lfrate = 1/8;
+					var pan_lfrate = rrand(1, 1.5);
+					var x_base = rrand(0.01, 0.3);
+					var fb_base = rrand(0.01, 0.3);
+					var cutoff_lfrate = rrand(1.0, 2.0);
 					var pat;
-					panc.postln;
-					pat = Pbind(type: \set, id: syn, args: [\gate, \pan, \cutoff, \x_depth],
-						gate: Pseq([1, 0], inf),
+
+					Ndef(self.tos('lf1'), { SinOsc.kr(TempoClock.tempo / [63, 137].choose) });
+					Ndef(self.tos('lf2'), { SinOsc.kr(TempoClock.tempo / [37, 97].choose) });
+					Ndef(self.tos('env1'), { EnvGen.kr(
+						Env([0, 0, 1, 1, 0],
+							[[11, 21].choose, [3, 30].choose, [2, 12].choose, [3, 30].choose],
+							releaseNode: 3, loopNode: 0)) });
+					Ndef(self.tos('env2'), { EnvGen.kr(
+						Env([0, 0, 1, 1, 0],
+							[[11, 21].choose, [3, 30].choose, [2, 12].choose, [3, 30].choose],
+							releaseNode: 3, loopNode: 0)) });
+
+					gate: Pseq([1, 0], inf),
 						x_depth: Ndef(self.tos('x_lf'),
-							{ SinOsc.kr(x_lfrate).linlin(-1, 1, 0.01, 0.5)}),
+							{ SinOsc.kr(x_lfrate).linlin(-1, 1, 0.1, 0.2)}),
+						fb_depth: Ndef(self.tos('fb_lf'),
+							{ SinOsc.kr(fb_lfrate).linlin(-1, 1, 0.1, 0.2)}),
 						pan: Ndef(self.tos('pan_lf'),
 							{ SinOsc.kr(pan_lfrate).linlin(-1, 1, panc - pan_w, panc + pan_w)}),
 						cutoff: Ndef(self.tos('cutoff_lf'),
-							{ SinOsc.kr(cutoff_lfrate).linexp(-1, 1, 100, 4500) }),
+							{ SinOsc.kr(cutoff_lfrate).linlin(-1, 1, 0.5, 0.6) }),
 						dur: Pseq([2, 3], inf)
 					).play;
 					self.pattern = pat;
 					self.state = 'flowering';
 					self;
 				},
+
+				/*! kick this particular thread into it's final stage and clean it up */
 				prune: { | self, prune_t = 0 |
 					self.pruner = Routine({
 						/* maybe find a way to wait until our env is 0 */
@@ -184,14 +211,20 @@ s.waitForBoot({
 						}*/
 						Ndef(self.tos('pan_lf')).clear;
 						Ndef(self.tos('x_lf')).clear;
+						Ndef(self.tos('fb_lf')).clear;
 						Ndef(self.tos('cutoff_lf')).clear;
+
+						Ndef(self.tos('lf1')).clear;
+						Ndef(self.tos('lf2')).clear;
+						Ndef(self.tos('env1')).clear;
+						Ndef(self.tos('env2')).clear;
 						self.synth_n.free;
 						self.state = 'compost';
 					}).play;
 				}
 			);
 			self.players.add(handle);
-			handle.init();
+			handle.init(); // returns the handle so 'spawn' can return it
 		},
 		/*! stop and cleanup a particular synth, and associated patterns and lfos */
 		cull: { |self|
@@ -209,10 +242,12 @@ s.waitForBoot({
 ~k0rok.baseFreqA
 ~k0rok.freqRatios.wchoose(~k0rok.freqWeights)
 p = ~k0rok.spawn
+p.ssy(\cutoff, 0)
+p.ssy(\cutoff, -0.6)
 p.prune
 ~k0rok.cull
-p.ssy(\x_depth, 0.1)
-p.ssy(\fb_depth, 0.41)
+p.ssy(\x_depth, 1.2)
+p.ssy(\fb_depth, 0.1)
 p.ssy(\freqA, 27)
 p.ssy(\freqB, 97)
 p.aay(\gate, 0)
@@ -220,7 +255,8 @@ p.ssy(\preFadeSend, 1)
 p.msy(\x_depth, Ndef(\lf, {SinOsc.ar(0.25)* 0.5 + 1.2}))
 
 ~clouds.set(\pitch, -3.7)
-
+~x = 1
+(~x == 1).asInt
 Ndef(\lf, { SinOsc.ar(5)} )
 (
 ~s1 = Synth("chaosc", [\preFadeBus, ~grainBus, \postFadeBus, ~reverbBus , \freqA, 16, \freqB, 37, \depth, 1,
@@ -255,3 +291,6 @@ Ndef(\lfx, { SinOsc.kr(0.1) });
 ~s1.set(\preFadeSend, 0);
 ~s1.set(\modAtoB, 100)
 ~s1.set(\modBtoA, 200)
+
+-1.linexp(-1, 0, 20000, 50)
+{ 

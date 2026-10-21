@@ -20,6 +20,7 @@ f = Routine({
 
 )
 f.reset
+TempoClock.tempo
 
 /*
 in supercollider what's the best way to get a smooth control signal from an array of values
@@ -203,11 +204,30 @@ Some notes:
 */
 
 
-{LPF.ar(Saw.ar(200, 0.1), SinOsc.kr(XLine.kr(0.7, 300, 20), 0, 360, 40)) }.play;
+a = {LPF.ar(Saw.ar(200, 0.1), SinOsc.kr(XLine.kr(0.7, 300, 20), 0, 360, 40)) }.play;
 
-{HPF.ar(Saw.ar(200, 0.1), XLine.kr(10, 18000, 10)) }.play;
+a = {HPF.ar(Saw.ar(200, 0.1), XLine.kr(10, \cutoff.kr(18000), 10)) }.play;
+a.set(\cutoff, 100)
+Ndef(\lf1, {SinOsc.kr(6)})
+Ndef(\lf, {Ndef.kr(\lf1).linlin(-1,1,30,10000)})
+a.map(\cutoff, {Ndef.kr(\lf1)})
+a = {HPF.ar(Saw.ar(200, 0.1), \cutoff.kr(18000)) }.play;
+
+Ndef(\sound).play;
+Ndef(\sound).fadeTime = 1;
+Ndef(\sound, { SinOsc.ar(\freq.kr(200)) });
+Ndef(\sound, Pbind(\dur, 0.17, \freq, Pfunc({ rrand(300, 700) })));
+
+Ndef(\lfi, { SinOsc.kr(0.25) })
+Ndef(\lfi, { EnvGen.kr(Env([0, 0, 1, 1, 0], [1, 1, 1, 1, 1], releaseNode: 3, loopNode: 0), gate: 1) })
+Ndef(\lfi, { EnvGen.kr(Env([0, 0, 1, 1, 0], [rrand(2, 3), rrand(2, 3), rrand(1, 4), rrand(2, 4)], releaseNode: 3, loopNode: 0)) });
 
 
+Ndef(\lfo, { 50 + 10 * Ndef.kr(\lfi) })
+Ndef(\lfo, { LFNoise1.kr(3, 100, 200) });
+Ndef(\sound).map(\freq, Ndef(\lfo));
+
+rrand(10, 20)
 (
 Ndef(\xfm, {
     arg freqA = 32, freqB = 9, modAtoB = 227, modBtoA = 110;
@@ -278,3 +298,4 @@ f = Routine({|x|
 )
 // Make sure the server is booted
 s.boot;
+~parth43 = [49/48, 33/32, 21/20, 16/15, 12/11, 11/10, 10/9, 9/8, 8/7, 7/6, 32/27, 6/5, 11/9, 5/4, 14/11, 9/7, 21/16, 4/3, 15/11, 11/8, 7/5, 10/7, 16/11, 22/15, 3/2, 32/21, 14/9, 11/7, 8/5, 18/11, 5/3, 27/16, 12/7, 7/4, 16/9, 9/5, 20/11, 11/6, 15/8, 40/21, 64/33, 96/49,	2/1]

@@ -4,24 +4,26 @@
 ~r3.free;
 s.freeAll
 (
-f = Routine({
-	var env = Env([0, 1, 0], [5, 5]);
-	e = env.asStream;
-	loop {
-		e.value.post;
-		' '.post;
-		e.endBeat.post;
-		' '.post;
-		thisThread.beats.postln;
-		0.1.wait;
-		if (thisThread.beats > e.endBeat) { e = env.asStream; }
-	}
-}).play;
-
+f = { | t |
+	var z = Routine({
+		var env = Env([0, 1, 0], [t, t]);
+		e = env.asStream;
+		loop {
+			e.value.post;
+			' '.post;
+			e.endBeat.post;
+			' '.post;
+			thisThread.beats.postln;
+			0.1.wait;
+			if (thisThread.beats > e.endBeat) { e = env.asStream; }
+		}
+	}).play;
+}
 )
 f.reset
 TempoClock.tempo
 
+{ RLPF.ar(Saw.ar(200, 0.1), SinOsc.ar(XLine.kr(0.7, 300, 20), 0, 3600, 4000), 0.1) }.play;
 /*
 in supercollider what's the best way to get a smooth control signal from an array of values
 

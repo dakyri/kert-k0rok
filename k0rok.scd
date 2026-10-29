@@ -63,7 +63,8 @@ s.waitForBoot({
 	// \amp, \pan, \gate
 	// \postFadeSend, \postFadeBus - post fade send and destination
 	// \preFadeBus, \preFadeLag, \preFadeSend - pre fade aux. before env, but after filter, gated by (1-env)
-	// \cutoff - [-1, 1] sets range and filter type +ve low pass, -ve high pass, 0 none.
+	// \cutoff - [-1, 1] sets range and filter type +ve low pass, -ve high pass, 0 none. we are scaled so
+	//    that clost to 1 or -1 we are heavily filtered.
 	SynthDef("chaosc", {
 		arg freqA = 90, freqB = 303, x_depth = 0.1, fb_depth = 0, gate = 0, cutoff = 0, resonance = 0.5;
 		var sig, env, pfd_env;
@@ -75,10 +76,10 @@ s.waitForBoot({
 		// Send the signals back into the feedback loop
 		LocalOut.ar(fsigs);
 		sig = \amp.kr(1) * 0.5 * (fsigs[0] + fsigs[1]);
-		sig = Select.ar(cutoff.sign + 1, [
-			RHPF.ar(sig, cutoff.linexp(-1, 0, 20000, 20), resonance),
+		sig = Select.ar((cutoff.sign + 1), [
+			RHPF.ar(sig, cutoff.lincurve(-1, 0, 4000, 20, -4), resonance),
 			sig,
-			RLPF.ar(sig, cutoff.linexp(0, 1, 20000, 20), resonance)]);
+			RLPF.ar(sig, cutoff.lincurve(0, 1, 4000, 20, -4), resonance)]);
 		sig = Pan2.ar(sig, \pan.kr(0));
 		env = EnvGen.kr(Env.asr(\attackT.kr(0), 1, \decayT.kr(0.2), 'linear'), gate);
 		pfd_env = \preFadeSend.kr(0).lag(\preFadeLag.kr(1)) * (1 - env);
@@ -122,8 +123,8 @@ s.waitForBoot({
 	~k0rok = (
 		type: \composite,
 		baseFreqA: 80,
-		freqRatios:  [1, 33/32, 16/15, 12/11, 9/8, 7/6, 11/9, 6/5],
-		freqWeights: [0.2, 0.2, 0.2, 0.2, 0.2],
+		freqRatios:  [1,   33/32, 16/15, 12/11, 9/8, 7/6, 11/9, 6/5],
+		freqWeights: [0.2, 0.2,   0.1,   0.1,   0.1, 0.1, 0.1,  0.1],
 		partch43: [49/48, 33/32, 21/20, 16/15, 12/11, 11/10, 10/9, 9/8, 8/7, 7/6, 32/27, 6/5, 11/9,
 				5/4, 14/11, 9/7, 21/16, 4/3, 15/11, 11/8, 7/5, 10/7, 16/11, 22/15, 3/2, 32/21, 14/9, 11/7, 8/5, 18/11,
 				5/3, 27/16, 12/7, 7/4, 16/9, 9/5, 20/11, 11/6, 15/8, 40/21, 64/33, 96/49,	2/1],
@@ -148,7 +149,7 @@ s.waitForBoot({
 			var syn = Synth("chaosc", [
 				\freqA: freqA, \freqB: freqB,
 				postFadeBus: ~reverbBus, postFadeSend: 0.3, preFadeBus: ~grainBus,
-				x_depth: 0.1, fb_depth: 0, pan: 0]);
+				x_depth: 0.1, fb_depth: 0, resonance: 0.2, pan: 0]);
 			var handle = (
 				type: \composite,
 				synth_n: syn,
@@ -164,13 +165,18 @@ s.waitForBoot({
 					var pan_w = 0.3;
 					var panc = rrand(pan_w - 1, 1 - pan_w);
 					var pan_lfrate = rrand(1, 1.5);
-					var x_base = rrand(0.01, 0.3);
-					var fb_base = rrand(0.01, 0.3);
-					var cutoff_lfrate = rrand(1.0, 2.0);
+					var x_base = rrand(0.4, 0.7);
+					var fb_base = rrand(0.05, 0.15);
+					var cutoff_base = rrand(0.6, 0.8);
 					var pat;
 
-					Ndef(self.tos('lf1'), { SinOsc.kr(TempoClock.tempo / [63, 137].choose) });
-					Ndef(self.tos('lf2'), { SinOsc.kr(TempoClock.tempo / [37, 97].choose) });
+					postf("synth %, freqA %, freqB %, cutoff %, fb % x %",
+						syn.nodeID, freqA, freqB, cutoff_base, fb_base, x_base);
+
+					Ndef(self.tos('lf1'), { SinOsc.kr(TempoClock.tempo / [63, 137].choose, pi*[0, 0.5, 1, 1.5].choose) });
+					Ndef(self.tos('lf2'), { SinOsc.kr(TempoClock.tempo / [37, 97].choose, pi*[0, 0.5, 1, 1.5].choose) });
+					Ndef(self.tos('lf3'), { SinOsc.kr(TempoClock.tempo / [1, 4].choose, pi*[0, 0.5, 1, 1.5].choose) });
+					Ndef(self.tos('lf4'), { SinOsc.kr(TempoClock.tempo / [1, 4].choose, pi*[0, 0.5, 1, 1.5].choose) });
 					Ndef(self.tos('env1'), { EnvGen.kr(
 						Env([0, 0, 1, 1, 0],
 							[[11, 21].choose, [3, 30].choose, [2, 12].choose, [3, 30].choose],
@@ -180,15 +186,19 @@ s.waitForBoot({
 							[[11, 21].choose, [3, 30].choose, [2, 12].choose, [3, 30].choose],
 							releaseNode: 3, loopNode: 0)) });
 
-					gate: Pseq([1, 0], inf),
+					pat =  Pbind(type: \set, id: syn, args: [\gate, \pan, \cutoff, \x_depth],
+						gate: Pseq([1, 0], inf),
 						x_depth: Ndef(self.tos('x_lf'),
-							{ SinOsc.kr(x_lfrate).linlin(-1, 1, 0.1, 0.2)}),
+							{ ((0.9 * Ndef(self.tos('lf2')).kr) + (0.1 * Ndef(self.tos('lf4')).kr))
+								.linlin(-1, 1, x_base - 0.3, x_base + 0.3)}),
 						fb_depth: Ndef(self.tos('fb_lf'),
-							{ SinOsc.kr(fb_lfrate).linlin(-1, 1, 0.1, 0.2)}),
+							{ ((0.8 * Ndef(self.tos('lf1')).kr) + (0.1 * Ndef(self.tos('lf4')).kr))
+								.linlin(-1, 1, fb_base - 0.05, fb_base + 0.05)}),
+						cutoff: Ndef(self.tos('cutoff_lf'),
+							{ ((0.9 * Ndef(self.tos('lf1')).kr) + (0.1 * Ndef(self.tos('lf3')).kr))
+								.linlin(-1, 1, cutoff_base - 0.15, cutoff_base + 0.15)}),
 						pan: Ndef(self.tos('pan_lf'),
 							{ SinOsc.kr(pan_lfrate).linlin(-1, 1, panc - pan_w, panc + pan_w)}),
-						cutoff: Ndef(self.tos('cutoff_lf'),
-							{ SinOsc.kr(cutoff_lfrate).linlin(-1, 1, 0.5, 0.6) }),
 						dur: Pseq([2, 3], inf)
 					).play;
 					self.pattern = pat;
@@ -216,6 +226,8 @@ s.waitForBoot({
 
 						Ndef(self.tos('lf1')).clear;
 						Ndef(self.tos('lf2')).clear;
+						Ndef(self.tos('lf3')).clear;
+						Ndef(self.tos('lf4')).clear;
 						Ndef(self.tos('env1')).clear;
 						Ndef(self.tos('env2')).clear;
 						self.synth_n.free;
@@ -237,15 +249,15 @@ s.waitForBoot({
 })
 )
 
-
 ~k0rok.freq
 ~k0rok.baseFreqA
 ~k0rok.freqRatios.wchoose(~k0rok.freqWeights)
 p = ~k0rok.spawn
-p.ssy(\cutoff, 0)
-p.ssy(\cutoff, -0.6)
 p.prune
 ~k0rok.cull
+p.ssy(\cutoff, 1)
+p.ssy(\cutoff, -1)
+p.ssy(\resonance, 1)
 p.ssy(\x_depth, 1.2)
 p.ssy(\fb_depth, 0.1)
 p.ssy(\freqA, 27)
@@ -254,6 +266,9 @@ p.aay(\gate, 0)
 p.ssy(\preFadeSend, 1)
 p.msy(\x_depth, Ndef(\lf, {SinOsc.ar(0.25)* 0.5 + 1.2}))
 
+f = ({|x| x.lincurve(-1, 0, 20000, 20, -6)})
+
+f.(-1)
 ~clouds.set(\pitch, -3.7)
 ~x = 1
 (~x == 1).asInt

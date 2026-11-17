@@ -156,9 +156,16 @@ s.waitForBoot({
 				tos: { | self, nm | (nm ++ '_' ++ syn.nodeID).asSymbol; },
 				ssy: { | self, x, y | self.synth_n.set(x, y); },
 				msy: { | self, x, y | self.synth_n.map(x, y.asBus); },
+				gsy: { | self, sym |
+					var val;
+					self.synth_n.get(sym, { | x | val = x; });
+					s.sync;
+					val;
+				},
 				pattern: Pbind(type: \set),
 				pruner: nil,
 				state: 'planted',
+				generation: 0,
 
 				/*! dowa most of the normal running setup here */
 				init: { | self |
@@ -173,6 +180,8 @@ s.waitForBoot({
 					postf("synth %, freqA %, freqB %, cutoff %, fb % x %",
 						syn.nodeID, freqA, freqB, cutoff_base, fb_base, x_base);
 
+					self.generation = 0;
+
 					Ndef(self.tos('lf1'), { SinOsc.kr(TempoClock.tempo / [63, 137].choose, pi*[0, 0.5, 1, 1.5].choose) });
 					Ndef(self.tos('lf2'), { SinOsc.kr(TempoClock.tempo / [37, 97].choose, pi*[0, 0.5, 1, 1.5].choose) });
 					Ndef(self.tos('lf3'), { SinOsc.kr(TempoClock.tempo / [1, 4].choose, pi*[0, 0.5, 1, 1.5].choose) });
@@ -186,8 +195,14 @@ s.waitForBoot({
 							[[11, 21].choose, [3, 30].choose, [2, 12].choose, [3, 30].choose],
 							releaseNode: 3, loopNode: 0)) });
 
-					pat =  Pbind(type: \set, id: syn, args: [\gate, \pan, \cutoff, \x_depth],
+					pat =  Pbind(type: \set, id: syn, args: [\gate, \pan, \cutoff, \x_depth, \attackT, \decayT],
 						gate: Pseq([1, 0], inf),
+						generation: Pfunc({ | ev |
+							if (ev[\gate] > 0, {
+								self.generation = self.generation + 1;
+							});
+							self.generation;
+						}),
 						x_depth: Ndef(self.tos('x_lf'),
 							{ ((0.9 * Ndef(self.tos('lf2')).kr) + (0.1 * Ndef(self.tos('lf4')).kr))
 								.linlin(-1, 1, x_base - 0.3, x_base + 0.3)}),
@@ -199,7 +214,12 @@ s.waitForBoot({
 								.linlin(-1, 1, cutoff_base - 0.15, cutoff_base + 0.15)}),
 						pan: Ndef(self.tos('pan_lf'),
 							{ SinOsc.kr(pan_lfrate).linlin(-1, 1, panc - pan_w, panc + pan_w)}),
-						dur: Pseq([2, 3], inf)
+						attackT: Pwhite(0.5, Pkey(\generation)/2),
+						decayT: Pwhite(0.5, Pkey(\generation)/2),
+						dur: Pseq([
+							(Pkey(\attackT) + Pwhite(0.5, Pkey(\generation)/2)).ceil,
+							(Pkey(\decayT) + Pwhite(1.0, Pkey(\generation))).ceil
+						], inf)
 					).play;
 					self.pattern = pat;
 					self.state = 'flowering';
@@ -207,12 +227,22 @@ s.waitForBoot({
 				},
 
 				/*! kick this particular thread into it's final stage and clean it up */
-				prune: { | self, prune_t = 0 |
+				prune: { | self, prune_t = 2, after_wait_t = 0 |
 					self.pruner = Routine({
 						/* maybe find a way to wait until our env is 0 */
+						after_wait_t.yield;
+						self.state = 'pruned';
 						self.pattern.stop;
 						self.pattern.free;
-						prune_t.yield;
+						self.gsy(\decayT).postln;
+						self.gsy(\dur).postln;
+						self.ssy(\gate, 1);
+						Ndef(self.tos('pan_lf'), {SinOsc.kr(XLine.kr(0.5, 16, prune_t))});
+						Ndef(self.tos('cutoff_lf'), {XLine.kr(-0.01, -1, prune_t)});
+						p.ssy(\preFadeSend, 0);
+						(prune_t/2).yield;
+						p.ssy(\preFadeSend, 1);
+						(prune_t/2).yield;
 						/*loop {
 							delta = rrand(1, 3) * 0.5;
 							"Will wait ".post;
@@ -239,7 +269,7 @@ s.waitForBoot({
 			handle.init(); // returns the handle so 'spawn' can return it
 		},
 		/*! stop and cleanup a particular synth, and associated patterns and lfos */
-		cull: { |self|
+		cull: { |self, min_cull_t=2, max_cull_t=2, min_wait_t=0, max_wait_t=0|
 			self.players.do({|player, i| player.prune;});
 			self.players.reverseDo({|item, i| self.players.pop.postln;});
 		},
@@ -253,8 +283,9 @@ s.waitForBoot({
 ~k0rok.baseFreqA
 ~k0rok.freqRatios.wchoose(~k0rok.freqWeights)
 p = ~k0rok.spawn
-p.prune
+p.prune(10, 4)
 ~k0rok.cull
+p.gsy(\resonance)
 p.ssy(\cutoff, 1)
 p.ssy(\cutoff, -1)
 p.ssy(\resonance, 1)
@@ -265,47 +296,4 @@ p.ssy(\freqB, 97)
 p.aay(\gate, 0)
 p.ssy(\preFadeSend, 1)
 p.msy(\x_depth, Ndef(\lf, {SinOsc.ar(0.25)* 0.5 + 1.2}))
-
-f = ({|x| x.lincurve(-1, 0, 20000, 20, -6)})
-
-f.(-1)
 ~clouds.set(\pitch, -3.7)
-~x = 1
-(~x == 1).asInt
-Ndef(\lf, { SinOsc.ar(5)} )
-(
-~s1 = Synth("chaosc", [\preFadeBus, ~grainBus, \postFadeBus, ~reverbBus , \freqA, 16, \freqB, 37, \depth, 1,
-	\pan -0.1])
-)
-~s1.set(\preFadeSend, 1)
-~s1.set(\gate, 0)
-~s1.set(\x_depth, 1.4)
-~s1.set(\modBtoA, 100)
-~s1.set(\freqA, 17)
-~s1.set(\freqB, 15)
-~s1.map(\x_depth, Ndef(\lfx, { SinOsc.kr(0.3).linlin(-1, 1, 0.3, 2) }).asBus)
-Ndef(\lfx, { SinOsc.kr(0.05).linexp(-1, 1, 1.3, 4) }).asBus
-~s1.nodeID
-~s1.free
-Ndef(\lfx, { ~lfo1Bus.kr(1).exprange(100, 2000) })
-Ndef(\lfx, { SinOsc.kr(0.1) });
-~s1.set(\cutoff, 590)
-~s1.map(\cutoff, Ndef(\lfo2, { SinOsc.kr(0.25).exprange(200, 600)}).asBus)
-~s1.map(\depth, Ndef(\lfo3, { SinOsc.kr(3) + SinOsc.kr(0.09123) }).asBus)
-~s1.map(\pan, Ndef(\lfo4, { SinOsc.kr(0.1) }).asBus)
-~s1.set(\pan, 1)
-~clouds.set(\pitch, -13)
-~clouds.set(\fb, 0.25)
-~s1.set(\gate, 1)
-~s1.set(\gate, 0)
-~s1.set(\depth, 1.2)
-~s1.set(\pan, -0.5)
-~s1.set(\cutoff, 400);
-~s1.set(\resonance, 0.8);
-~s1.set(\postFadeSend, 0.1);
-~s1.set(\preFadeSend, 0);
-~s1.set(\modAtoB, 100)
-~s1.set(\modBtoA, 200)
-
--1.linexp(-1, 0, 20000, 50)
-{ 

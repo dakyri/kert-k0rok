@@ -23,6 +23,18 @@ f = { | t |
 f.reset
 TempoClock.tempo
 
+Pwhite.new(lo: 0.0, hi: 1.0, length: inf) // random
+Pmeanrand.new(lo: 0.0, hi: 1.0, length: inf) // random tends to mean
+Phprand.new(lo: 0.0, hi: 1.0, length: inf) // random tends to hi
+Plprand.new(lo: 0.0, hi: 1.0, length: inf) // random tends to low
+Pexprand.new(lo: 0.0001, hi: 1.0, length: inf) // exponential distribution. relates to poisson but continuous
+Ppoisson.new(mean: 1, length: inf) // discrete probability of a certain number of events in a given time
+Pgauss.new(mean: 0.0, dev: 1, length: inf) // normal dist
+Pcauchy.new(mean: 0.0, spread: 1.0, length: inf) // normal dist but higher peak heavier tails
+Pbrown.new(lo: 0.0, hi: 1.0, step: 0.125, length: inf) // brownian motion
+Pgbrown.new(lo: 0.0, hi: 1.0, step: 0.125, length: inf) // geometric brownian motion
+
+Pbind(freq: Pgauss(100, 20), dur: Pgauss(1, 0.5)).play
 { RLPF.ar(Saw.ar(200, 0.1), SinOsc.ar(XLine.kr(0.7, 300, 20), 0, 3600, 4000), 0.1) }.play;
 /*
 in supercollider what's the best way to get a smooth control signal from an array of values
@@ -41,6 +53,23 @@ supercollider
     SinOsc.ar(freq) * 0.1
 }.play
 )
+
+(
+Pbind(
+    // Pairs [degree, dur] together on every single event
+    [\degree, \dur], Prand([
+        [0, 0.5],   // Low note is always a half-beat
+        [7, 0.125], // High note is always a 16th-note
+        [4, 0.25]   // Mid note is always an 8th-note
+    ], inf).trace
+).play;
+)
+
+(
+x = 0;
+Pbind(dur: Pwhite(0.5, 5).trace, funk: Pfunc({ x = x + 1; x.postln; })).play;
+)
+
 /*
 \sin gives smooth S-curves between points. \exp sounds more natural for frequencies (all values must be > 0), and a number like -4 gives custom curvature. Env.xyc lets you set a curve per segment.
 2. Looping or endless: DemandEnvGen
@@ -118,11 +147,13 @@ SynthDef(\sine, { |out = 0, freq = 440, amp = 0.1|
 	Out.ar(out, Pan2.ar(SinOsc.ar(freq.lag(0.05)) * amp * env, \pan.kr(0)));
 }).add;
 )
-
-p = Pbind(type: \set, id: ~synth, sendGate: true, freq: Pseq([40, 100, 300, 200], inf), gate: Pseq([1,0], inf), dur: Pseq([0.2, 0.3, 0.5, 1], inf)).play
+x = 0;
+p = Pbind(type: \set, id: ~synth, args: [\gate, \freq], sendGate: true, freq: Pseq([40, 100, 300, 50, 200], inf), gate: Pseq([1,0], inf), dur: Pseq([0.2, 0, 0.1, 0.1, 0.5, 1], inf), gen: Pfunc({x = x + 1; x.postln; })).play
 ~synth.set(\gate, 0)
 ~synth = Synth(\sine);
 ~synth.map(\freq, ~bus);   // freq now follows the bus
+~synth.set(\decayT, 4);
+~synth.set(\attackT, 4);
 ~synth.free
 ~synth.nodeID
 p.stop
@@ -301,3 +332,38 @@ f = Routine({|x|
 // Make sure the server is booted
 s.boot;
 ~parth43 = [49/48, 33/32, 21/20, 16/15, 12/11, 11/10, 10/9, 9/8, 8/7, 7/6, 32/27, 6/5, 11/9, 5/4, 14/11, 9/7, 21/16, 4/3, 15/11, 11/8, 7/5, 10/7, 16/11, 22/15, 3/2, 32/21, 14/9, 11/7, 8/5, 18/11, 5/3, 27/16, 12/7, 7/4, 16/9, 9/5, 20/11, 11/6, 15/8, 40/21, 64/33, 96/49,	2/1]
+
+
+(
+~s1 = Synth("chaosc", [\preFadeBus, ~grainBus, \postFadeBus, ~reverbBus , \freqA, 16, \freqB, 37, \depth, 1,
+	\pan -0.1])
+)
+~s1.set(\preFadeSend, 1)
+~s1.set(\gate, 0)
+~s1.set(\x_depth, 1.4)
+~s1.set(\modBtoA, 100)
+~s1.set(\freqA, 17)
+~s1.set(\freqB, 15)
+~s1.map(\x_depth, Ndef(\lfx, { SinOsc.kr(0.3).linlin(-1, 1, 0.3, 2) }).asBus)
+Ndef(\lfx, { SinOsc.kr(0.05).linexp(-1, 1, 1.3, 4) }).asBus
+~s1.nodeID
+~s1.free
+Ndef(\lfx, { ~lfo1Bus.kr(1).exprange(100, 2000) })
+Ndef(\lfx, { SinOsc.kr(0.1) });
+~s1.set(\cutoff, 590)
+~s1.map(\cutoff, Ndef(\lfo2, { SinOsc.kr(0.25).exprange(200, 600)}).asBus)
+~s1.map(\depth, Ndef(\lfo3, { SinOsc.kr(3) + SinOsc.kr(0.09123) }).asBus)
+~s1.map(\pan, Ndef(\lfo4, { SinOsc.kr(0.1) }).asBus)
+~s1.set(\pan, 1)
+~clouds.set(\pitch, -13)
+~clouds.set(\fb, 0.25)
+~s1.set(\gate, 1)
+~s1.set(\gate, 0)
+~s1.set(\depth, 1.2)
+~s1.set(\pan, -0.5)
+~s1.set(\cutoff, 400);
+~s1.set(\resonance, 0.8);
+~s1.set(\postFadeSend, 0.1);
+~s1.set(\preFadeSend, 0);
+~s1.set(\modAtoB, 100)
+~s1.set(\modBtoA, 200)

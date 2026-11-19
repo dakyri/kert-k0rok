@@ -82,7 +82,7 @@ s.waitForBoot({
 			RLPF.ar(sig, cutoff.lincurve(0, 1, 4000, 20, -4), resonance)]);
 		sig = Pan2.ar(sig, \pan.kr(0));
 		env = EnvGen.kr(Env.asr(\attackT.kr(0), 1, \decayT.kr(0.2), 'linear'), gate);
-		pfd_env = \preFadeSend.kr(0).lag(\preFadeLag.kr(1)) * (1 - env);
+		pfd_env = \preFadeSend.kr(0).lag(\preFadeLag.kr(3)) * (1 - env);
 		Out.ar(\preFadeBus.kr(9), pfd_env * sig);
 		sig = env * sig;
 		Out.ar(\outBus.kr(0), sig);
@@ -166,6 +166,7 @@ s.waitForBoot({
 				pruner: nil,
 				state: 'planted',
 				generation: 0,
+				activeT: 0,
 
 				/*! dowa most of the normal running setup here */
 				init: { | self |
@@ -181,6 +182,7 @@ s.waitForBoot({
 						syn.nodeID, freqA, freqB, cutoff_base, fb_base, x_base);
 
 					self.generation = 0;
+					self.activeT = 0;
 
 					Ndef(self.tos('lf1'), { SinOsc.kr(TempoClock.tempo / [63, 137].choose, pi*[0, 0.5, 1, 1.5].choose) });
 					Ndef(self.tos('lf2'), { SinOsc.kr(TempoClock.tempo / [37, 97].choose, pi*[0, 0.5, 1, 1.5].choose) });
@@ -197,7 +199,7 @@ s.waitForBoot({
 
 					pat =  Pbind(type: \set, id: syn, args: [\gate, \pan, \cutoff, \x_depth, \attackT, \decayT],
 						gate: Pseq([1, 0], inf),
-						generation: Pfunc({ | ev |
+						generation: Pfunc({ |ev|
 							if (ev[\gate] > 0, {
 								self.generation = self.generation + 1;
 							});
@@ -214,12 +216,18 @@ s.waitForBoot({
 								.linlin(-1, 1, cutoff_base - 0.15, cutoff_base + 0.15)}),
 						pan: Ndef(self.tos('pan_lf'),
 							{ SinOsc.kr(pan_lfrate).linlin(-1, 1, panc - pan_w, panc + pan_w)}),
-						attackT: Pwhite(0.5, Pkey(\generation)/2),
-						decayT: Pwhite(0.5, Pkey(\generation)/2),
+						attackT: Pdup(2, Pwhite(0.5, Pkey(\generation)/2)),
+						decayT: Pdup(2, Pwhite(0.5, Pkey(\generation)/2)),
+						gateT: Pdup(2, Pwhite(0.5, Pkey(\generation)/2)),
+						restT: Pdup(2, Pwhite(Pkey(\generation)/2, Pkey(\generation))),
 						dur: Pseq([
-							(Pkey(\attackT) + Pwhite(0.5, Pkey(\generation)/2)).ceil,
-							(Pkey(\decayT) + Pwhite(1.0, Pkey(\generation))).ceil
-						], inf)
+							(Pkey(\attackT) + Pkey(\gateT)).ceil,
+							(Pkey(\decayT) + Pkey(\restT)).ceil
+						], inf),
+						activeT: Pfunc({ |ev|
+							self.activeT = ev[\attackT] + ev[\gateT] + ev[\decayT];
+							self.activeT;
+						})
 					).play;
 					self.pattern = pat;
 					self.state = 'flowering';
@@ -235,14 +243,15 @@ s.waitForBoot({
 						self.pattern.stop;
 						self.pattern.free;
 						self.gsy(\decayT).postln;
-						self.gsy(\dur).postln;
 						self.ssy(\gate, 1);
 						Ndef(self.tos('pan_lf'), {SinOsc.kr(XLine.kr(0.5, 16, prune_t))});
 						Ndef(self.tos('cutoff_lf'), {XLine.kr(-0.01, -1, prune_t)});
-						p.ssy(\preFadeSend, 0);
-						(prune_t/2).yield;
-						p.ssy(\preFadeSend, 1);
-						(prune_t/2).yield;
+						"sending to pf".postln;
+						self.ssy(\preFadeSend, 0.5);
+						(prune_t/4).yield;
+						"cutting to pf".postln;
+						self.ssy(\preFadeSend, 0);
+						prune_t.yield;
 						/*loop {
 							delta = rrand(1, 3) * 0.5;
 							"Will wait ".post;
@@ -283,7 +292,7 @@ s.waitForBoot({
 ~k0rok.baseFreqA
 ~k0rok.freqRatios.wchoose(~k0rok.freqWeights)
 p = ~k0rok.spawn
-p.prune(10, 4)
+p.prune(5, 1)
 ~k0rok.cull
 p.gsy(\resonance)
 p.ssy(\cutoff, 1)

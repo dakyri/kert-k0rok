@@ -20,6 +20,19 @@ f = { | t |
 	}).play;
 }
 )
+
+
+~k0rok.freq
+~k0rok.baseFreqA
+~k0rok.freqRatios.wchoose(~k0rok.freqWeights)
+
+						/*loop {
+							delta = rrand(1, 3) * 0.5;
+							"Will wait ".post;
+							delta.postln;
+							delta.yield;
+						}*/
+
 f.reset
 TempoClock.tempo
 

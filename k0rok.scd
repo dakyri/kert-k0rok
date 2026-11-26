@@ -81,7 +81,11 @@ s.waitForBoot({
 			sig,
 			RLPF.ar(sig, cutoff.lincurve(0, 1, 4000, 20, -4), resonance)]);
 		sig = Pan2.ar(sig, \pan.kr(0));
-		env = EnvGen.kr(Env.asr(\attackT.kr(0), 1, \decayT.kr(0.2), 'linear'), gate);
+		env = EnvGen.kr(Env.asr(
+			attackTime: \attackT.kr(0),
+			sustainLevel: 1,
+			releaseTime: \decayT.kr(0.2),
+			curve: \envKurva.kr(0)), gate);
 		pfd_env = \preFadeSend.kr(0).lag(\preFadeLag.kr(3)) * (1 - env);
 		Out.ar(\preFadeBus.kr(9), pfd_env * sig);
 		sig = env * sig;
@@ -146,9 +150,10 @@ s.waitForBoot({
 		spawn: { |self|
 			var freqA = self.baseFreqA * self.freqRatios.wchoose(self.freqWeights);
 			var freqB = freqA * self.partch43.choose * [1, 2, 3, 4].wchoose([0.1,0.5,0.3, 0.1]);
+			var pre_fade_lag = 3;
 			var syn = Synth("chaosc", [
 				\freqA: freqA, \freqB: freqB,
-				postFadeBus: ~reverbBus, postFadeSend: 0.3, preFadeBus: ~grainBus,
+				postFadeBus: ~reverbBus, postFadeSend: 0.3, preFadeBus: ~grainBus, preFadeLag: pre_fade_lag,
 				x_depth: 0.1, fb_depth: 0, resonance: 0.2, pan: 0]);
 			var handle = (
 				type: \composite,
@@ -167,6 +172,9 @@ s.waitForBoot({
 				state: 'planted',
 				generation: 0,
 				activeT: 0,
+				preFadeLag: pre_fade_lag,
+				fall_generation: rrand(5, 10),
+				fall_chance: rrand(0.1, 0.50),
 
 				/*! dowa most of the normal running setup here */
 				init: { | self |
@@ -178,51 +186,72 @@ s.waitForBoot({
 					var cutoff_base = rrand(0.6, 0.8);
 					var pat;
 
-					postf("synth %, freqA %, freqB %, cutoff %, fb % x %",
-						syn.nodeID, freqA, freqB, cutoff_base, fb_base, x_base);
+					postf("synth %, freqA %, freqB %, cutoff %, fb % x % fall % %\n",
+						syn.nodeID, freqA, freqB, cutoff_base, fb_base, x_base,
+						self.fall_generation, self.fall_chance);
 
 					self.generation = 0;
 					self.activeT = 0;
 
-					Ndef(self.tos('lf1'), { SinOsc.kr(TempoClock.tempo / [63, 137].choose, pi*[0, 0.5, 1, 1.5].choose) });
-					Ndef(self.tos('lf2'), { SinOsc.kr(TempoClock.tempo / [37, 97].choose, pi*[0, 0.5, 1, 1.5].choose) });
-					Ndef(self.tos('lf3'), { SinOsc.kr(TempoClock.tempo / [1, 4].choose, pi*[0, 0.5, 1, 1.5].choose) });
-					Ndef(self.tos('lf4'), { SinOsc.kr(TempoClock.tempo / [1, 4].choose, pi*[0, 0.5, 1, 1.5].choose) });
+					// lf1 and lf2 are very slow. lf3 and lf4 are medium. lfos will be in sync with underlying tempo
+					// phase is one of 4 values to keep us not to far off the implied, unstated beat
+					Ndef(self.tos('lf1'), { SinOsc.kr(TempoClock.tempo / rrand(63, 137), pi*[0, 0.5, 1, 1.5].choose) });
+					Ndef(self.tos('lf2'), { SinOsc.kr(TempoClock.tempo / rrand(37, 97), pi*[0, 0.5, 1, 1.5].choose) });
+					Ndef(self.tos('lf3'), { SinOsc.kr(TempoClock.tempo / rrand(1, 4), pi*[0, 0.5, 1, 1.5].choose) });
+					Ndef(self.tos('lf4'), { SinOsc.kr(TempoClock.tempo / rrand(1, 4), pi*[0, 0.5, 1, 1.5].choose) });
 					Ndef(self.tos('env1'), { EnvGen.kr(
 						Env([0, 0, 1, 1, 0],
-							[[11, 21].choose, [3, 30].choose, [2, 12].choose, [3, 30].choose],
+							[rrand(11, 21), rrand(3, 30), rrand(2, 12), rrand(3, 30)],
 							releaseNode: 3, loopNode: 0)) });
 					Ndef(self.tos('env2'), { EnvGen.kr(
 						Env([0, 0, 1, 1, 0],
-							[[11, 21].choose, [3, 30].choose, [2, 12].choose, [3, 30].choose],
+							[rrand(11, 21), rrand(3, 30), rrand(2, 12), rrand(3, 30)],
 							releaseNode: 3, loopNode: 0)) });
-
+					Pdef(self.tos('clouds'), Pbind(type: \set, id: syn)).play;
 					pat =  Pbind(type: \set, id: syn, args: [\gate, \pan, \cutoff, \x_depth, \attackT, \decayT],
 						gate: Pseq([1, 0], inf),
 						generation: Pfunc({ |ev|
-							if (ev[\gate] > 0, {
+							if (ev[\gate] > 0) {
 								self.generation = self.generation + 1;
-							});
+								if(self.generation >= self.fall_generation) {
+									if (self.fall_chance.coin) {
+										var prune_t = rrand(self.fall_generation/2, self.generation/2);
+										var wait_t = rrand(1, 8);
+										postf("auto pruning to % after %\n", prune_t, wait_t);
+										self.prune(prune_t, wait_t);
+									};
+								};
+							} {
+								Pdef(self.tos('clouds'),
+									Pbind(type: \set, id: syn, args: [\preFadeSend],
+										preFadeSend: Pseq([0.9, 0], inf),
+										dur: Pseq([
+											self.activeT.floor,
+											Pwhite(min(self.preFadeLag, self.activeT), self.activeT).ceil], inf)));
+							};
 							self.generation;
 						}),
+						test: Ndef(self.tos('env1')).kr,
 						x_depth: Ndef(self.tos('x_lf'),
-							{ ((0.9 * Ndef(self.tos('lf2')).kr) + (0.1 * Ndef(self.tos('lf4')).kr))
+							{ ((0.6 * Ndef(self.tos('lf2')).kr) + (0.3 * Ndef(self.tos('env1')).kr)
+								+ (0.1 * Ndef(self.tos('lf4')).kr))
 								.linlin(-1, 1, x_base - 0.3, x_base + 0.3)}),
 						fb_depth: Ndef(self.tos('fb_lf'),
 							{ ((0.8 * Ndef(self.tos('lf1')).kr) + (0.1 * Ndef(self.tos('lf4')).kr))
 								.linlin(-1, 1, fb_base - 0.05, fb_base + 0.05)}),
 						cutoff: Ndef(self.tos('cutoff_lf'),
-							{ ((0.9 * Ndef(self.tos('lf1')).kr) + (0.1 * Ndef(self.tos('lf3')).kr))
+							{ ((0.6 * Ndef(self.tos('lf1')).kr) + (0.3 * Ndef(self.tos('env1')).kr)
+								+ (0.1 * Ndef(self.tos('lf3')).kr))
 								.linlin(-1, 1, cutoff_base - 0.15, cutoff_base + 0.15)}),
 						pan: Ndef(self.tos('pan_lf'),
 							{ SinOsc.kr(pan_lfrate).linlin(-1, 1, panc - pan_w, panc + pan_w)}),
 						attackT: Pdup(2, Pwhite(0.5, Pkey(\generation)/2)),
 						decayT: Pdup(2, Pwhite(0.5, Pkey(\generation)/2)),
 						gateT: Pdup(2, Pwhite(0.5, Pkey(\generation)/2)),
-						restT: Pdup(2, Pwhite(Pkey(\generation)/2, Pkey(\generation))),
+						restT: Pdup(2, Pwhite(2*Pkey(\generation), 2.5 * Pkey(\generation))),
 						dur: Pseq([
-							(Pkey(\attackT) + Pkey(\gateT)).ceil,
-							(Pkey(\decayT) + Pkey(\restT)).ceil
+							Pfin(1, (Pkey(\attackT) + Pkey(\gateT)).ceil),
+							Pfin(1, (Pkey(\decayT) + Pkey(\restT)).ceil)
 						], inf),
 						activeT: Pfunc({ |ev|
 							self.activeT = ev[\attackT] + ev[\gateT] + ev[\decayT];
@@ -238,26 +267,39 @@ s.waitForBoot({
 				prune: { | self, prune_t = 2, after_wait_t = 0 |
 					self.pruner = Routine({
 						/* maybe find a way to wait until our env is 0 */
+						var decay_t;
+						var attack_t;
+						if (self.state != 'flowering') {
+							^("already exiting")
+						};
 						after_wait_t.yield;
 						self.state = 'pruned';
 						self.pattern.stop;
 						self.pattern.free;
-						self.gsy(\decayT).postln;
-						self.ssy(\gate, 1);
+						self.ssy(\gate, 0);
+						Pdef(self.tos('clouds')).clear;
+						decay_t = self.gsy(\decayT);
+						attack_t = self.gsy(\attackT);
+						postf("prune t %, got attack % decay % and waiting\n", prune_t, attack_t, decay_t);
+						decay_t.yield;
+						attack_t = prune_t * 0.25;
+						decay_t = prune_t * 0.75;
+						self.ssy(\attackT, attack_t);
+						self.ssy(\decayT, decay_t);
+						self.ssy(\envKurva, 0);
 						Ndef(self.tos('pan_lf'), {SinOsc.kr(XLine.kr(0.5, 16, prune_t))});
 						Ndef(self.tos('cutoff_lf'), {XLine.kr(-0.01, -1, prune_t)});
+						self.ssy(\gate, 1);
+						attack_t.yield;
+						self.ssy(\preFadeSend, 1);
+						self.ssy(\gate, 0);
 						"sending to pf".postln;
-						self.ssy(\preFadeSend, 0.5);
-						(prune_t/4).yield;
-						"cutting to pf".postln;
+						decay_t.yield;
+						self.activeT.yield;
 						self.ssy(\preFadeSend, 0);
-						prune_t.yield;
-						/*loop {
-							delta = rrand(1, 3) * 0.5;
-							"Will wait ".post;
-							delta.postln;
-							delta.yield;
-						}*/
+						3.yield; // a margin to prevent or at least reduce clicks
+
+						// final cleanup
 						Ndef(self.tos('pan_lf')).clear;
 						Ndef(self.tos('x_lf')).clear;
 						Ndef(self.tos('fb_lf')).clear;
@@ -271,6 +313,7 @@ s.waitForBoot({
 						Ndef(self.tos('env2')).clear;
 						self.synth_n.free;
 						self.state = 'compost';
+						"zapped".postln;
 					}).play;
 				}
 			);
@@ -278,7 +321,7 @@ s.waitForBoot({
 			handle.init(); // returns the handle so 'spawn' can return it
 		},
 		/*! stop and cleanup a particular synth, and associated patterns and lfos */
-		cull: { |self, min_cull_t=2, max_cull_t=2, min_wait_t=0, max_wait_t=0|
+		cull: { |self, min_cull_t=1, max_cull_t=1, min_wait_t=0, max_wait_t=0|
 			self.players.do({|player, i| player.prune;});
 			self.players.reverseDo({|item, i| self.players.pop.postln;});
 		},
@@ -288,21 +331,8 @@ s.waitForBoot({
 })
 )
 
-~k0rok.freq
-~k0rok.baseFreqA
-~k0rok.freqRatios.wchoose(~k0rok.freqWeights)
 p = ~k0rok.spawn
-p.prune(5, 1)
+p.prune(10, 1)
 ~k0rok.cull
-p.gsy(\resonance)
-p.ssy(\cutoff, 1)
-p.ssy(\cutoff, -1)
-p.ssy(\resonance, 1)
-p.ssy(\x_depth, 1.2)
-p.ssy(\fb_depth, 0.1)
-p.ssy(\freqA, 27)
-p.ssy(\freqB, 97)
-p.aay(\gate, 0)
-p.ssy(\preFadeSend, 1)
-p.msy(\x_depth, Ndef(\lf, {SinOsc.ar(0.25)* 0.5 + 1.2}))
+
 ~clouds.set(\pitch, -3.7)
